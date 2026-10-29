@@ -45,10 +45,12 @@
 <div id="hud">
   <div>
     <div class="title">Pixel Beads</div>
-    <div class="stats"><span id="lv"></span> ・ スコア <span id="score">0</span></div>
+    <div class="stats"><span id="lv"></span></div>
+    <div class="stats">まちがい <span id="left">0</span> ・ 手数 <span id="moves">0</span></div>
   </div>
   <div>
     <button class="btn" id="helpBtn">？</button>
+    <button class="btn" id="hintBtn">ヒント</button>
     <button class="btn" id="restartBtn">やり直す</button>
   </div>
 </div>
@@ -194,42 +196,85 @@ const LEVELS = [
 
 // ---------- Rules ----------
 const TRAY_COLS = 12, TRAY_ROWS = 5, TRAY_SIZE = TRAY_COLS * TRAY_ROWS;
-const PICK_CAP = 10;   // max beads collected per tap
-const MATCH = 10;      // beads of one color in the tray that get cleared
+const COLOR_ORDER = Object.values(PALETTE);
 
 // ---------- State ----------
 const cv = document.getElementById('cv');
 const ctx = cv.getContext('2d');
 let DPR = 1, VW = 0, VH = 0;
-let level = 0, score = 0;
-let W = 0, H = 0, grid = [], ghost = [];
-let tray = [];        // {color, x, y, id, delay, popping}
+let level = 0, moves = 0;
+let W = 0, H = 0;
+let cells = [];       // cells[y][x] = {cur, target, reserved}
+let holes = [];       // [x, y] in the order they were opened
+let beads = [];       // moving / tray beads: {color, x, y, size, state, id, delay, cx, cy}
 let particles = [];
-let shakes = [];      // {x,y,t}
+let shakes = [];      // {x, y, t}
+let hintT = 0;
 let nextId = 1;
-let state = 'play';   // play | win | lose
+let state = 'play';   // play | pause | win | lose
 let layout = {};
 const sprites = new Map();
 
 try { level = Math.min(+localStorage.getItem('pb_level') || 0, LEVELS.length - 1); } catch (e) {}
+
+// ---------- Level setup ----------
+function regionsOf() {
+  const seen = new Set(), regions = [];
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    if (seen.has(y * W + x)) continue;
+    const color = cells[y][x].target, q = [[x, y]], reg = [];
+    seen.add(y * W + x);
+    while (q.length) {
+      const [cx, cy] = q.shift(); reg.push([cx, cy]);
+      for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+        const nx = cx + dx, ny = cy + dy, k = ny * W + nx;
+        if (inside(nx, ny) && !seen.has(k) && cells[ny][nx].target === color) { seen.add(k); q.push([nx, ny]); }
+      }
+    }
+    regions.push({ color, cells: reg });
+  }
+  return regions;
+}
+
+// Scramble by swapping beads between cells, so every color keeps its exact count.
+function scramble(swaps, strays) {
+  const regions = regionsOf().filter(r => r.cells.length >= 4);
+  for (let s = 0; s < swaps && regions.length > 1; s++) {
+    const a = regions[Math.floor(Math.random() * regions.length)];
+    const others = regions.filter(r => r.color !== a.color);
+    if (!others.length) break;
+    const b = others[Math.floor(Math.random() * others.length)];
+    const n = Math.min(a.cells.length, b.cells.length, 24 + level * 4);
+    for (let i = 0; i < n; i++) {
+      const [ax, ay] = a.cells[i], [bx, by] = b.cells[i];
+      const t = cells[ay][ax].cur; cells[ay][ax].cur = cells[by][bx].cur; cells[by][bx].cur = t;
+    }
+  }
+  for (let s = 0; s < strays; s++) {
+    const ax = rnd(W), ay = rnd(H), bx = rnd(W), by = rnd(H);
+    const t = cells[ay][ax].cur; cells[ay][ax].cur = cells[by][bx].cur; cells[by][bx].cur = t;
+  }
+}
+const rnd = n => Math.floor(Math.random() * n);
 
 function loadLevel(i) {
   level = i;
   const art = LEVELS[i].art;
   H = art.length;
   W = Math.max(...art.map(r => r.length));
-  grid = []; ghost = [];
+  cells = [];
   for (let y = 0; y < H; y++) {
-    const row = [], grow = [];
+    const row = [];
     for (let x = 0; x < W; x++) {
       const ch = art[y][x] || art[y][art[y].length - 1];
       const col = PALETTE[ch] || PALETTE.c;
-      row.push(col); grow.push(col);
+      row.push({ cur: col, target: col, reserved: false });
     }
-    grid.push(row); ghost.push(grow);
+    cells.push(row);
   }
-  tray = []; particles = []; shakes = [];
-  score = 0;
+  scramble(2 + i, 8 + i * 4);
+  holes = []; beads = []; particles = []; shakes = []; hintT = 0;
+  moves = 0;
   state = 'play';
   hideOverlay();
   updateHud();
@@ -239,7 +284,10 @@ function loadLevel(i) {
 
 function updateHud() {
   document.getElementById('lv').textContent = `レベル ${level + 1}「${LEVELS[level].name}」`;
-  document.getElementById('score').textContent = score;
+  document.getElementById('moves').textContent = moves;
+  let wrong = 0;
+  for (const row of cells) for (const c of row) if (c.cur !== c.target) wrong++;
+  document.getElementById('left').textContent = wrong;
 }
 
 // ---------- Layout ----------
@@ -253,21 +301,22 @@ function resize() {
   const pad = 16, top = document.getElementById('hud').getBoundingClientRect().bottom + 4;
   const safeBottom = document.getElementById('safeBottom').getBoundingClientRect().height;
   const maxW = Math.min(VW - pad * 2, 560);
-  // tray
   const slot = Math.floor(Math.min(maxW / TRAY_COLS, (VH * 0.3) / TRAY_ROWS));
   const trayW = slot * TRAY_COLS, trayH = slot * TRAY_ROWS;
   const trayPad = Math.round(slot * 0.35);
   const trayY = VH - pad - safeBottom - trayH - trayPad * 2;
-  // board
   const availH = trayY - top - 20;
   const cell = Math.max(4, Math.floor(Math.min(maxW / W, availH / H)));
   const boardW = cell * W, boardH = cell * H;
+  const old = layout;
   layout = {
     cell, slot, trayPad,
     bx: Math.round((VW - boardW) / 2), by: Math.round(top + (availH - boardH) / 2),
     boardW, boardH,
     tx: Math.round((VW - trayW) / 2), ty: trayY + trayPad, trayW, trayH,
   };
+  // keep beads that are mid-air in place relative to the new layout
+  if (old.cell) for (const b of beads) { b.size = b.state === 'toBoard' ? cell : slot; }
   sprites.clear();
 }
 window.addEventListener('resize', resize);
@@ -285,6 +334,7 @@ function rr(c, x, y, w, h, r) {
   c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath();
 }
 function beadSprite(color, size) {
+  size = Math.max(4, Math.round(size));
   const key = color + '|' + size;
   let s = sprites.get(key);
   if (s) return s;
@@ -315,12 +365,12 @@ function beadSprite(color, size) {
 
 // ---------- Rules ----------
 const inside = (x, y) => x >= 0 && y >= 0 && x < W && y < H;
-function exposed(x, y) {
-  if (x === 0 || y === 0 || x === W - 1 || y === H - 1) return true;
-  return !grid[y - 1][x] || !grid[y + 1][x] || !grid[y][x - 1] || !grid[y][x + 1];
-}
+const isWrong = (x, y) => cells[y][x].cur && cells[y][x].cur !== cells[y][x].target;
+const trayCount = () => beads.filter(b => b.state !== 'toBoard').length;
+
+// connected beads of the same (wrong) color
 function collectGroup(sx, sy, cap) {
-  const color = grid[sy][sx];
+  const color = cells[sy][sx].cur;
   const seen = new Set([sy * W + sx]);
   const q = [[sx, sy]], out = [];
   while (q.length && out.length < cap) {
@@ -328,18 +378,14 @@ function collectGroup(sx, sy, cap) {
     out.push([x, y]);
     for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
       const nx = x + dx, ny = y + dy, k = ny * W + nx;
-      if (inside(nx, ny) && !seen.has(k) && grid[ny][nx] === color) { seen.add(k); q.push([nx, ny]); }
+      if (inside(nx, ny) && !seen.has(k) && cells[ny][nx].cur === color && isWrong(nx, ny)) { seen.add(k); q.push([nx, ny]); }
     }
   }
   return out;
 }
-function boardEmpty() {
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (grid[y][x]) return false;
-  return true;
-}
 function sortedTray() {
-  const order = [...new Set(tray.map(b => b.color))];
-  return tray.slice().sort((a, b) => (order.indexOf(a.color) - order.indexOf(b.color)) || (a.id - b.id));
+  return beads.filter(b => b.state !== 'toBoard')
+    .sort((a, b) => (COLOR_ORDER.indexOf(a.color) - COLOR_ORDER.indexOf(b.color)) || (a.id - b.id));
 }
 function slotPos(i) {
   const { tx, ty, slot } = layout;
@@ -350,85 +396,106 @@ function tap(px, py) {
   if (state !== 'play') return;
   const { bx, by, cell } = layout;
   const x = Math.floor((px - bx) / cell), y = Math.floor((py - by) / cell);
-  if (!inside(x, y) || !grid[y][x]) return;
-  if (!exposed(x, y)) {
+  if (!inside(x, y) || !cells[y][x].cur) return;
+  if (!isWrong(x, y)) {
     shakes.push({ x, y, t: 0 });
-    toast('外側か、空いた所のとなりのビーズを取ろう');
+    toast('そのビーズは正しい色だよ');
     return;
   }
-  const free = TRAY_SIZE - tray.length;
-  if (free <= 0) return;
-  const group = collectGroup(x, y, Math.min(PICK_CAP, free));
-  const color = grid[y][x];
+  const free = TRAY_SIZE - trayCount();
+  if (free <= 0) { toast('トレイがいっぱい！'); return; }
+  const group = collectGroup(x, y, free);
+  const color = cells[y][x].cur;
   group.forEach(([gx, gy], i) => {
-    grid[gy][gx] = null;
-    tray.push({ color, id: nextId++, x: bx + gx * cell, y: by + gy * cell,
-      size: cell, delay: i * 0.025 });
+    cells[gy][gx].cur = null;
+    holes.push([gx, gy]);
+    beads.push({ color, id: nextId++, state: 'toTray', x: bx + gx * cell, y: by + gy * cell,
+      size: cell, delay: i * 0.02 });
   });
-  if (free < PICK_CAP && group.length === free) toast('トレイがいっぱい！');
+  moves++;
+  updateHud();
 }
 
-function checkMatches() {
-  const counts = {};
-  for (const b of tray) if (!b.popping && b.delay <= 0 && b.settled) (counts[b.color] = (counts[b.color] || 0) + 1);
-  for (const color in counts) {
-    if (counts[color] >= MATCH) {
-      let n = 0;
-      for (const b of tray) if (b.color === color && !b.popping && b.settled && n < MATCH) { b.popping = 0.0001; n++; }
-      score += 100;
-      updateHud();
-    }
+// send tray beads to holes that want their color
+function dispatch() {
+  let sent = 0;
+  for (const b of beads) {
+    if (b.state !== 'tray' || sent >= 3) continue;
+    const idx = holes.findIndex(([x, y]) => !cells[y][x].reserved && cells[y][x].target === b.color);
+    if (idx < 0) continue;
+    const [x, y] = holes.splice(idx, 1)[0];
+    cells[y][x].reserved = true;
+    b.state = 'toBoard'; b.cx = x; b.cy = y;
+    sent++;
   }
 }
 
 function checkEnd() {
   if (state !== 'play') return;
-  const busy = tray.some(b => b.popping || !b.settled);
-  if (busy) return;
-  if (boardEmpty()) {
+  if (beads.some(b => b.state !== 'tray' || b.delay > 0)) return;
+  let done = true;
+  for (const row of cells) for (const c of row) if (c.cur !== c.target) { done = false; break; }
+  if (done && !beads.length) {
     state = 'win';
-    score += Math.max(0, (TRAY_SIZE - tray.length) * 10);
-    updateHud();
-    const last = level === LEVELS.length - 1, lv = level;
-    setTimeout(() => state === 'win' && level === lv && showOverlay('クリア！', `「${LEVELS[level].name}」完成！<br>スコア ${score}`,
-      last ? [['最初から', () => loadLevel(0), true]] : [['次のレベル', () => loadLevel(level + 1), true]]), 300);
-  } else if (tray.length >= TRAY_SIZE) {
+    const lastLv = level === LEVELS.length - 1, lv = level;
+    burst();
+    setTimeout(() => state === 'win' && level === lv && showOverlay('完成！', `「${LEVELS[level].name}」がきれいに並んだ！<br>${moves} 手でクリア`,
+      lastLv ? [['最初から', () => loadLevel(0), true]] : [['次のレベル', () => loadLevel(level + 1), true]]), 700);
+    return;
+  }
+  const stuck = trayCount() >= TRAY_SIZE &&
+    !beads.some(b => holes.some(([x, y]) => cells[y][x].target === b.color));
+  if (stuck) {
     state = 'lose';
-    setTimeout(() => state === 'lose' && showOverlay('トレイが満杯…', '同じ色を10個そろえると消えるよ。<br>もう一度挑戦しよう！',
-      [['やり直す', () => loadLevel(level), true]]), 300);
+    setTimeout(() => state === 'lose' && showOverlay('トレイが満杯…',
+      '入れる場所のないビーズでトレイが埋まってしまった。<br>行き先のある色から外すのがコツ！',
+      [['やり直す', () => loadLevel(level), true]]), 400);
+  }
+}
+function burst() {
+  const { bx, by, cell } = layout;
+  for (let i = 0; i < 80; i++) {
+    const x = rnd(W), y = rnd(H);
+    particles.push({ x: bx + x * cell + cell / 2, y: by + y * cell + cell / 2,
+      vx: (Math.random() - .5) * 300, vy: -Math.random() * 380, life: 1, color: cells[y][x].target });
   }
 }
 
 // ---------- Loop ----------
-let last = performance.now();
+let lastT = performance.now();
 function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now;
   update(dt); draw(now / 1000);
   requestAnimationFrame(frame);
 }
 function update(dt) {
-  const sorted = sortedTray();
-  const slot = layout.slot;
-  sorted.forEach((b, i) => {
+  const { slot, bx, by, cell } = layout;
+  const k = Math.min(1, dt * 10);
+  sortedTray().forEach((b, i) => {
     if (b.delay > 0) { b.delay -= dt; return; }
     const p = slotPos(i);
-    const k = Math.min(1, dt * 10);
     b.x += (p.x - b.x) * k; b.y += (p.y - b.y) * k; b.size += (slot - b.size) * k;
-    if (Math.abs(p.x - b.x) < 0.5 && Math.abs(p.y - b.y) < 0.5) b.settled = true;
-    else if (!b.popping && Math.abs(p.y - b.y) > slot) b.settled = false;
-    if (b.popping) b.popping += dt;
+    if (b.state === 'toTray' && Math.abs(p.x - b.x) < 1 && Math.abs(p.y - b.y) < 1) b.state = 'tray';
   });
-  for (const b of tray) {
-    if (b.popping > 0.25) {
-      for (let i = 0; i < 6; i++) particles.push({ x: b.x + slot / 2, y: b.y + slot / 2,
-        vx: (Math.random() - .5) * 260, vy: (Math.random() - .8) * 260, life: 0.6, color: b.color });
+  for (const b of beads) {
+    if (b.state !== 'toBoard') continue;
+    const tx = bx + b.cx * cell, ty = by + b.cy * cell;
+    const kk = Math.min(1, dt * 12);
+    b.x += (tx - b.x) * kk; b.y += (ty - b.y) * kk; b.size += (cell - b.size) * kk;
+    if (Math.abs(tx - b.x) < 1 && Math.abs(ty - b.y) < 1) {
+      const c = cells[b.cy][b.cx];
+      c.cur = b.color; c.reserved = false;
+      b.done = true;
+      for (let i = 0; i < 3; i++) particles.push({ x: tx + cell / 2, y: ty + cell / 2,
+        vx: (Math.random() - .5) * 120, vy: (Math.random() - .5) * 120, life: 0.35, color: '#ffffff' });
     }
   }
-  tray = tray.filter(b => !(b.popping > 0.25));
+  if (beads.some(b => b.done)) { beads = beads.filter(b => !b.done); updateHud(); }
+  dispatch();
   particles.forEach(p => { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 600 * dt; p.life -= dt; });
   particles = particles.filter(p => p.life > 0);
   shakes.forEach(s => s.t += dt); shakes = shakes.filter(s => s.t < 0.35);
-  checkMatches();
+  if (hintT > 0) hintT -= dt;
   checkEnd();
 }
 
@@ -437,20 +504,29 @@ function draw(t) {
   ctx.fillStyle = '#d6cdee'; ctx.fillRect(0, 0, VW, VH);
   const { bx, by, cell, boardW, boardH, tx, ty, trayW, trayH, trayPad, slot } = layout;
 
-  // board frame
+  // board
   ctx.fillStyle = 'rgba(255,255,255,.35)';
   rr(ctx, bx - 6, by - 6, boardW + 12, boardH + 12, 10); ctx.fill();
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    const c = grid[y][x];
-    let dx = 0;
-    const s = shakes.find(s => s.x === x && s.y === y);
-    if (s) dx = Math.sin(s.t * 60) * cell * 0.15 * (1 - s.t / 0.35);
-    if (c) {
-      ctx.drawImage(beadSprite(c, cell), bx + x * cell + dx, by + y * cell, cell, cell);
+    const c = cells[y][x];
+    const px = bx + x * cell, py = by + y * cell;
+    if (c.cur) {
+      let dx = 0;
+      const s = shakes.find(s => s.x === x && s.y === y);
+      if (s) dx = Math.sin(s.t * 60) * cell * 0.15 * (1 - s.t / 0.35);
+      ctx.drawImage(beadSprite(c.cur, cell), px + dx, py, cell, cell);
+      if (hintT > 0 && c.cur !== c.target) {
+        ctx.globalAlpha = 0.5 + 0.5 * Math.sin(t * 12);
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = Math.max(1.5, cell * 0.12);
+        rr(ctx, px + 1, py + 1, cell - 2, cell - 2, cell * 0.3); ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
     } else {
-      // faint silhouette of the picture
-      ctx.globalAlpha = 0.18; ctx.fillStyle = ghost[y][x];
-      ctx.fillRect(bx + x * cell + cell * 0.3, by + y * cell + cell * 0.3, cell * 0.4, cell * 0.4);
+      // empty socket that shows which color belongs here
+      ctx.fillStyle = 'rgba(255,255,255,.55)';
+      rr(ctx, px + cell * 0.1, py + cell * 0.1, cell * 0.8, cell * 0.8, cell * 0.25); ctx.fill();
+      ctx.globalAlpha = 0.45; ctx.fillStyle = c.target;
+      ctx.beginPath(); ctx.arc(px + cell / 2, py + cell / 2, cell * 0.2, 0, Math.PI * 2); ctx.fill();
       ctx.globalAlpha = 1;
     }
   }
@@ -466,37 +542,26 @@ function draw(t) {
     rr(ctx, p.x + slot * 0.1, p.y + slot * 0.1, slot * 0.8, slot * 0.8, slot * 0.25); ctx.fill();
     ctx.strokeStyle = '#d8c3a0'; ctx.lineWidth = 1.5; ctx.stroke();
   }
-  // tray fill meter
-  const ratio = tray.length / TRAY_SIZE;
+  const n = trayCount(), ratio = n / TRAY_SIZE;
   ctx.fillStyle = ratio > 0.8 ? '#e8364a' : ratio > 0.6 ? '#ff8a1f' : '#7a5cff';
   ctx.font = '700 12px system-ui, sans-serif'; ctx.textAlign = 'right';
-  ctx.fillText(`${tray.length} / ${TRAY_SIZE}`, tx + trayW + trayPad - 4, ty - trayPad - 6);
+  ctx.fillText(`トレイ ${n} / ${TRAY_SIZE}`, tx + trayW + trayPad - 4, ty - trayPad - 6);
 
-  // tray beads (flying ones drawn on top)
-  const flying = [];
-  for (const b of tray) {
-    if (b.delay > 0) { ctx.drawImage(beadSprite(b.color, Math.round(cell)), b.x, b.y, cell, cell); continue; }
-    if (!b.settled) { flying.push(b); continue; }
-    drawTrayBead(b, t);
-  }
-  for (const b of flying) drawTrayBead(b, t);
+  // beads: resting ones first, flying ones on top
+  for (const b of beads) if (b.state === 'tray') ctx.drawImage(beadSprite(b.color, slot), b.x, b.y, b.size, b.size);
+  for (const b of beads) if (b.state !== 'tray') ctx.drawImage(beadSprite(b.color, Math.max(cell, slot)), b.x, b.y, b.size, b.size);
 
   for (const p of particles) {
-    ctx.globalAlpha = Math.max(0, p.life / 0.6); ctx.fillStyle = p.color;
+    ctx.globalAlpha = Math.max(0, Math.min(1, p.life / 0.6)); ctx.fillStyle = p.color;
     ctx.beginPath(); ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2); ctx.fill();
   }
-  ctx.globalAlpha = 1;
-}
-function drawTrayBead(b, t) {
-  let s = b.size, ox = 0;
-  if (b.popping) { s = b.size * (1 + b.popping * 2); ox = (s - b.size) / 2; ctx.globalAlpha = 1 - b.popping * 3; }
-  ctx.drawImage(beadSprite(b.color, Math.max(4, Math.round(layout.slot))), b.x - ox, b.y - ox, s, s);
   ctx.globalAlpha = 1;
 }
 
 // ---------- UI ----------
 cv.addEventListener('pointerdown', e => tap(e.clientX, e.clientY));
 document.getElementById('restartBtn').onclick = () => loadLevel(level);
+document.getElementById('hintBtn').onclick = () => { if (state === 'play') hintT = 1.6; };
 document.getElementById('helpBtn').onclick = showHelp;
 
 let toastTimer;
@@ -521,14 +586,15 @@ function showHelp() {
   const prev = state;
   if (state === 'play') state = 'pause';
   showOverlay('あそびかた',
-    '外側のビーズ、または空いたマスのとなりのビーズをタップすると、同じ色のビーズが最大10個トレイに入ります。<br>' +
-    'トレイで同じ色が<b>10個</b>そろうと消えます。<br>トレイ(60マス)が満杯になる前に、絵のビーズを全部取りきろう！',
+    '絵の中に<b>まちがった色のビーズ</b>がまざっています。<br>' +
+    'タップすると、つながった同じ色のビーズがトレイへ移動。空いたマスには、トレイから<b>正しい色のビーズ</b>が自動で飛んでいきます。<br>' +
+    'トレイ(60マス)が行き場のないビーズで満杯になる前に、絵を完成させよう！',
     [['OK', () => { hideOverlay(); state = prev; }, true]]);
 }
 
 loadLevel(level);
 requestAnimationFrame(frame);
-try { if (!localStorage.getItem('pb_seen_help')) { localStorage.setItem('pb_seen_help', '1'); showHelp(); } }
+try { if (!localStorage.getItem('pb_seen_help2')) { localStorage.setItem('pb_seen_help2', '1'); showHelp(); } }
 catch (e) { showHelp(); }
 </script>
 </body>
