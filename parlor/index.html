@@ -1,0 +1,592 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ホール経営物語</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&display=swap">
+<style>
+  /* Layout: one-screen app. Status bar on top, scrolling tab content, tab bar at bottom. Neon-hall look, dark only by design. */
+  :root {
+    --bg: #130c22;
+    --panel: #1f1535;
+    --panel2: #2a1d47;
+    --line: #3d2c63;
+    --text: #f5f0ff;
+    --muted: #a99bc9;
+    --gold: #ffcf3a;
+    --pink: #ff4fa3;
+    --cyan: #3fe0ff;
+    --good: #4ade80;
+    --bad: #ff5d6c;
+    --display: "Dela Gothic One", "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
+    --body: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic", system-ui, sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--body); font-size: 14px;
+    display: flex; flex-direction: column; overflow: hidden; }
+  button, select, input { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* status bar */
+  #status { padding: 10px max(16px, env(safe-area-inset-right, 0px)) 10px max(16px, env(safe-area-inset-left, 0px));
+    background: linear-gradient(180deg, #2a1650, var(--bg)); border-bottom: 1px solid var(--line); display: grid; gap: 8px; }
+  .row1 { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  #shopName { font-family: var(--display); font-size: 18px; color: var(--gold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    text-shadow: 0 0 12px rgba(255,207,58,.45); min-width: 0; }
+  #rank { font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .row2 { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  #date { font-weight: 700; }
+  .badge { font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 999px; letter-spacing: .04em; }
+  .badge.big { background: var(--pink); color: #fff; box-shadow: 0 0 10px var(--pink); }
+  .badge.small { background: var(--cyan); color: #04202a; }
+  #money { font-family: var(--display); font-size: 20px; margin-left: auto; }
+  #money.neg { color: var(--bad); }
+  .row3 { display: flex; gap: 8px; align-items: center; }
+  .meter { flex: 1; display: grid; gap: 3px; min-width: 0; }
+  .meter label { font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; }
+  .bar { height: 6px; background: var(--panel2); border-radius: 99px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; border-radius: 99px; transition: width .4s; }
+  .ctrl { display: flex; gap: 6px; }
+  .cbtn { border: 1px solid var(--line); background: var(--panel); border-radius: 10px; padding: 6px 10px; font-weight: 700; white-space: nowrap; }
+  .cbtn.on { background: var(--pink); border-color: var(--pink); color: #fff; }
+  .cbtn.go { background: var(--gold); border-color: var(--gold); color: #2a1a00; }
+
+  main { flex: 1; overflow-y: auto; padding: 12px max(16px, env(safe-area-inset-right, 0px)) 16px max(16px, env(safe-area-inset-left, 0px));
+    display: grid; gap: 12px; align-content: start; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px; display: grid; gap: 10px; min-width: 0; }
+  .card h3 { margin: 0; font-size: 13px; letter-spacing: .06em; color: var(--muted); font-weight: 700; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .stat { background: var(--panel2); border-radius: 10px; padding: 8px; min-width: 0; }
+  .stat small { display: block; color: var(--muted); font-size: 11px; }
+  .stat b { font-size: 15px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .pos { color: var(--good); } .negc { color: var(--bad); }
+  .muted { color: var(--muted); font-size: 12px; line-height: 1.6; margin: 0; }
+
+  /* floor */
+  #floor { display: grid; grid-template-columns: repeat(auto-fill, minmax(16px, 1fr)); gap: 3px; }
+  .m { aspect-ratio: 3 / 4; border-radius: 3px; position: relative; max-width: 100%; }
+  .m.slot { background: var(--cyan); }
+  .m.pachi { background: var(--pink); }
+  .m.hot::after { content: ""; position: absolute; inset: -2px; border-radius: 4px; box-shadow: 0 0 6px 1px var(--gold); }
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11px; color: var(--muted); }
+  .legend span::before { content: ""; display: inline-block; width: 9px; height: 12px; border-radius: 2px; margin-right: 4px; vertical-align: -2px; background: var(--c); }
+
+  .chart { width: 100%; height: 110px; display: block; }
+  .news { display: grid; gap: 6px; max-height: 180px; overflow-y: auto; font-size: 12px; }
+  .news div { color: var(--muted); } .news b { color: var(--text); font-weight: 600; }
+
+  /* settings */
+  .model { display: grid; gap: 8px; }
+  .mhead { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .mname { font-weight: 800; font-size: 15px; }
+  .tag { font-size: 10px; padding: 1px 6px; border-radius: 99px; margin-left: 6px; font-weight: 700; vertical-align: 2px; }
+  .tag.slot { background: rgba(63,224,255,.18); color: var(--cyan); }
+  .tag.pachi { background: rgba(255,79,163,.18); color: var(--pink); }
+  .tag.new { background: var(--gold); color: #2a1a00; }
+  .chips { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+  .chips > span { font-size: 11px; color: var(--muted); width: 52px; }
+  .chip { border: 1px solid var(--line); background: var(--panel2); border-radius: 8px; width: 34px; height: 32px; font-weight: 800; }
+  .chip.on { background: var(--gold); border-color: var(--gold); color: #2a1a00; }
+  .chip.ev.on { background: var(--pink); border-color: var(--pink); color: #fff; }
+  details summary { color: var(--muted); font-size: 12px; cursor: pointer; }
+  .units { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; margin-top: 8px; }
+  .unit { background: var(--panel2); border-radius: 8px; padding: 6px 8px; display: flex; gap: 6px; align-items: center; font-size: 12px; }
+  .unit select { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 2px; }
+
+  /* calendar */
+  .calhead { display: flex; align-items: center; justify-content: space-between; }
+  .cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .cal .dow { text-align: center; font-size: 11px; color: var(--muted); }
+  .cal button { aspect-ratio: 1; border: 1px solid var(--line); background: var(--panel2); border-radius: 8px; padding: 2px; font-weight: 700;
+    display: grid; place-items: center; font-size: 13px; position: relative; max-width: 100%; min-width: 0; }
+  .cal button small { font-size: 9px; font-weight: 800; line-height: 1; }
+  .cal button.past { opacity: .35; }
+  .cal button.today { outline: 2px solid var(--gold); }
+  .cal button.ev1 { background: rgba(63,224,255,.22); border-color: var(--cyan); }
+  .cal button.ev2 { background: rgba(255,79,163,.3); border-color: var(--pink); }
+  .cal button.empty { visibility: hidden; }
+  select.full { width: 100%; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
+
+  /* shop & management */
+  .item { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 8px 0; border-top: 1px solid var(--line); }
+  .item:first-of-type { border-top: 0; }
+  .item .info { min-width: 0; display: grid; gap: 2px; }
+  .item .info small { color: var(--muted); font-size: 11px; }
+  .btns { display: flex; gap: 6px; flex-shrink: 0; }
+  .btn { border: 0; border-radius: 10px; padding: 8px 12px; font-weight: 800; background: var(--gold); color: #2a1a00; white-space: nowrap; }
+  .btn.sub { background: var(--panel2); color: var(--text); border: 1px solid var(--line); }
+  .btn:disabled { opacity: .35; cursor: default; }
+  input.name { width: 100%; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
+
+  /* tabs */
+  nav { display: grid; grid-template-columns: repeat(5, 1fr); border-top: 1px solid var(--line); background: var(--panel);
+    padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
+  nav button { background: none; border: 0; padding: 10px 0 12px; font-size: 11px; font-weight: 700; color: var(--muted); display: grid; justify-items: center; gap: 2px; }
+  nav button i { font-style: normal; font-size: 18px; line-height: 1; }
+  nav button.on { color: var(--gold); }
+
+  #toast { position: fixed; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 120px); transform: translate(-50%, -6px); background: var(--panel2);
+    border: 1px solid var(--gold); color: var(--text); padding: 8px 14px; border-radius: 12px; font-size: 13px; opacity: 0;
+    transition: opacity .25s, transform .25s; pointer-events: none; z-index: 5; max-width: calc(100% - 32px); text-align: center; }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+  #over[hidden] { display: none; }
+  #over { position: fixed; inset: 0; background: rgba(8,4,16,.7); display: grid; place-items: center; padding: 16px; z-index: 6; }
+  #over .card { max-width: 360px; width: 100%; text-align: center; }
+  #over h2 { margin: 0; font-family: var(--display); font-weight: 400; color: var(--gold); font-size: 24px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<header id="status">
+  <div class="row1"><div id="shopName"></div><div id="rank"></div></div>
+  <div class="row2"><span id="date"></span><span id="evBadge"></span><span id="money" class="num"></span></div>
+  <div class="row3">
+    <div class="meter"><label><span>評判</span><span id="repV" class="num"></span></label><div class="bar"><i id="repBar" style="background:var(--gold)"></i></div></div>
+    <div class="meter"><label><span>イベ信頼度</span><span id="trustV" class="num"></span></label><div class="bar"><i id="trustBar" style="background:var(--pink)"></i></div></div>
+    <div class="ctrl">
+      <button class="cbtn" id="autoBtn">▶ 自動</button>
+      <button class="cbtn go" id="nextBtn">翌日へ</button>
+    </div>
+  </div>
+</header>
+<main id="main"></main>
+<nav id="tabs"></nav>
+<div id="toast"></div>
+<div id="over" hidden></div>
+
+<script>
+// ---------- Data ----------
+const START = new Date(2026, 3, 1); // game starts 2026-04-01
+const DOW = ['日', '月', '火', '水', '木', '金', '土'];
+// payout rate by setting 1..6
+const RATE = { slot: [0.94, 0.97, 1.00, 1.03, 1.06, 1.10], pachi: [0.92, 0.95, 0.98, 1.01, 1.04, 1.07] };
+const COIN_IN = { slot: 300000, pachi: 260000 }; // yen played per machine per fully-occupied day
+const MODELS = [
+  { id: 'k7',     name: 'キラキラセブン',     kind: 'slot',  cat: 'Aタイプ', price: 150000, pop: 1.00, vol: 0.05, release: -999 },
+  { id: 'neon',   name: 'ネオンBAR',          kind: 'slot',  cat: 'Aタイプ', price: 130000, pop: 0.85, vol: 0.05, release: -999 },
+  { id: 'drg',    name: 'ドラゴンラッシュ',   kind: 'slot',  cat: 'AT機',    price: 210000, pop: 1.10, vol: 0.13, release: -999 },
+  { id: 'marine', name: 'マリンパラダイス',   kind: 'pachi', cat: '甘デジ',  price: 140000, pop: 1.00, vol: 0.06, release: -999 },
+  { id: 'samu',   name: '侍ブレイズ',         kind: 'pachi', cat: 'ミドル',  price: 190000, pop: 1.08, vol: 0.11, release: -999 },
+  { id: 'neko',   name: 'ねこまつり',         kind: 'pachi', cat: '甘デジ',  price: 180000, pop: 1.25, vol: 0.06, release: 14 },
+  { id: 'space',  name: '銀河大戦MAX',        kind: 'pachi', cat: 'ミドル',  price: 260000, pop: 1.40, vol: 0.15, release: 40 },
+  { id: 'sakura', name: 'サクラ吹雪',         kind: 'slot',  cat: 'AT機',    price: 275000, pop: 1.45, vol: 0.14, release: 70 },
+  { id: 'gold',   name: '黄金の招き猫',       kind: 'slot',  cat: 'Aタイプ', price: 225000, pop: 1.35, vol: 0.05, release: 100 },
+  { id: 'ninja',  name: '忍者ストーム',       kind: 'slot',  cat: 'AT機',    price: 310000, pop: 1.55, vol: 0.15, release: 135 },
+  { id: 'marine2',name: 'マリンパラダイス2',  kind: 'pachi', cat: 'ミドル',  price: 300000, pop: 1.55, vol: 0.10, release: 170 },
+  { id: 'kaiju',  name: '怪獣大進撃',         kind: 'pachi', cat: 'ミドル',  price: 340000, pop: 1.65, vol: 0.14, release: 220 },
+  { id: 'star',   name: 'スターダスト7',      kind: 'slot',  cat: 'Aタイプ', price: 280000, pop: 1.60, vol: 0.05, release: 270 },
+];
+const MODEL = Object.fromEntries(MODELS.map(m => [m.id, m]));
+const LEVELS = [
+  { name: '町の小さなホール', seats: 24,  cost: 0,         rent: 10000 },
+  { name: '商店街ホール',     seats: 48,  cost: 2000000,   rent: 45000 },
+  { name: '駅前店',           seats: 96,  cost: 6000000,  rent: 100000 },
+  { name: '郊外大型店',       seats: 180, cost: 18000000,  rent: 200000 },
+  { name: 'メガホール',       seats: 320, cost: 45000000,  rent: 380000 },
+  { name: '地域一番店',       seats: 500, cost: 110000000, rent: 600000 },
+];
+const ADS = [
+  { name: 'なし',         cost: 0,     mod: 1.00 },
+  { name: 'チラシ',       cost: 15000, mod: 1.10 },
+  { name: 'SNS広告',      cost: 40000, mod: 1.22 },
+  { name: 'テレビCM',     cost: 120000, mod: 1.40 },
+];
+const RULES = [
+  { id: 'none', name: 'なし',                 fn: () => 0 },
+  { id: 'd7',   name: '7のつく日（7・17・27日）', fn: d => d.getDate() % 10 === 7 ? 1 : 0 },
+  { id: 'd0',   name: '0のつく日（10・20・30日）', fn: d => d.getDate() % 10 === 0 ? 1 : 0 },
+  { id: 'zoro', name: 'ゾロ目（月と日が同じ）',   fn: d => d.getDate() === d.getMonth() + 1 ? 2 : 0 },
+  { id: 'sat',  name: '毎週土曜',               fn: d => d.getDay() === 6 ? 1 : 0 },
+  { id: 'pay',  name: '給料日（25日）',          fn: d => d.getDate() === 25 ? 1 : 0 },
+];
+const STAFF_WAGE = 10000, UPKEEP = 800, SELL_BACK = 0.2;
+const RANKS = [[0, '新人オーナー'], [40, '地元の顔'], [100, '人気ホール経営者'], [200, '業界の注目株'], [350, 'ホール王'], [480, '伝説のオーナー']];
+
+// ---------- State ----------
+let G;
+function newGame() {
+  let id = 1;
+  const machines = [];
+  const add = (model, n) => { for (let i = 0; i < n; i++) machines.push({ id: id++, model, s: 1, e: 4, seen: RATE[MODEL[model].kind][0], util: 0, pay: 0 }); };
+  add('k7', 6); add('neon', 4); add('marine', 6); add('samu', 4);
+  return {
+    name: 'ホール ラッキー', day: 0, money: 3000000, rep: 45, trust: 30, level: 0,
+    staff: 2, ad: 0, rule: 'd7', manual: {}, machines, nextId: id,
+    history: [], news: [{ d: 0, t: 'オープンしました！ まずは設定とイベ日を決めよう。' }],
+    seenModels: MODELS.filter(m => m.release <= 0).map(m => m.id), over: false,
+  };
+}
+function save() { try { localStorage.setItem('parlor_v1', JSON.stringify(G)); } catch (e) {} }
+function load() {
+  try { const s = JSON.parse(localStorage.getItem('parlor_v1')); if (s && s.machines) return s; } catch (e) {}
+  return null;
+}
+
+// ---------- Helpers ----------
+const dateOf = d => new Date(START.getFullYear(), START.getMonth(), START.getDate() + d);
+const dayIndex = date => Math.round((date - START) / 86400000);
+const fmtDate = d => { const x = dateOf(d); return `${x.getMonth() + 1}月${x.getDate()}日(${DOW[x.getDay()]})`; };
+const yen = v => (v < 0 ? '−' : '') + '¥' + Math.abs(Math.round(v)).toLocaleString('ja-JP');
+const man = v => { const a = Math.abs(v); const s = v < 0 ? '−' : ''; return a >= 1e8 ? `${s}${(a / 1e8).toFixed(2)}億円` : `${s}${Math.round(a / 1e4).toLocaleString('ja-JP')}万円`; };
+const pct = v => (v * 100).toFixed(1) + '%';
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const gauss = () => { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+const seats = () => LEVELS[G.level].seats;
+const staffNeed = () => Math.max(1, Math.ceil(G.machines.length / 15));
+function eventOf(d) {
+  if (G.manual[d] !== undefined) return G.manual[d];
+  return RULES.find(r => r.id === G.rule).fn(dateOf(d));
+}
+function popNow(m, d) {
+  const age = d - Math.max(m.release, -60);
+  return m.pop * (1 + 0.5 * Math.exp(-age / 30)) * Math.max(0.55, 1 - age / 700);
+}
+function available() { return MODELS.filter(m => m.release <= G.day); }
+function rankName() { let r = RANKS[0][1]; for (const [n, t] of RANKS) if (G.machines.length >= n) r = t; return r; }
+
+// ---------- Simulation ----------
+function advanceDay() {
+  if (G.over) return;
+  const d = G.day, date = dateOf(d), ev = eventOf(d);
+  const M = G.machines.length;
+  let dayMod = [1.2, 0.9, 0.9, 0.95, 0.95, 1.08, 1.3][date.getDay()];
+  if (date.getDate() === 25) dayMod *= 1.2;
+  const rain = Math.random() < 0.2;
+  if (rain) dayMod *= 1.06;
+  const evMod = ev ? 1 + (ev === 2 ? 1.0 : 0.5) * G.trust / 100 : 1;
+  const popAvg = M ? G.machines.reduce((a, m) => a + popNow(MODEL[m.model], d), 0) / M : 1;
+  const visitors = Math.round(M * 2.2 * (0.05 + G.rep / 100 * 1.6) * Math.sqrt(popAvg) * dayMod * evMod * ADS[G.ad].mod * (0.92 + Math.random() * 0.16));
+  // players stay longer at a hall where machines have been paying out
+  const seenAvg = M ? G.machines.reduce((a, m) => a + m.seen, 0) / M : 1;
+  let demand = Math.min(M, visitors * 0.55 * clamp(1 + (seenAvg - 1) * 5, 0.5, 1.4));
+
+  // customers pick machines by popularity and how loose the machine has looked lately
+  const w = G.machines.map(m => popNow(MODEL[m.model], d) * Math.exp(7 * (m.seen - 1)));
+  const util = G.machines.map(() => 0);
+  let left = demand;
+  for (let pass = 0; pass < 4 && left > 0.01; pass++) {
+    let sw = 0; G.machines.forEach((m, i) => { if (util[i] < 1) sw += w[i]; });
+    if (!sw) break;
+    let used = 0;
+    G.machines.forEach((m, i) => {
+      if (util[i] >= 1) return;
+      const add = Math.min(1 - util[i], left * w[i] / sw);
+      util[i] += add; used += add;
+    });
+    left -= used;
+  }
+
+  let sales = 0, out = 0, best = null;
+  G.machines.forEach((m, i) => {
+    const mod = MODEL[m.model];
+    const setting = ev ? m.e : m.s;
+    const u = util[i];
+    const pay = Math.max(0.2, RATE[mod.kind][setting - 1] + gauss() * mod.vol / Math.sqrt(Math.max(u, 0.15)) * 0.6);
+    const inn = u * COIN_IN[mod.kind];
+    sales += inn; out += inn * pay;
+    m.util = u; m.pay = pay;
+    if (u > 0.05) m.seen = m.seen * 0.75 + pay * 0.25;
+    if (!best || inn * (pay - 1) > best.v) best = { v: inn * (pay - 1), m };
+  });
+  const gross = sales - out;
+  const costs = LEVELS[G.level].rent + G.staff * STAFF_WAGE + M * UPKEEP + ADS[G.ad].cost;
+  const net = gross - costs;
+  G.money += net;
+
+  const avgPay = sales ? out / sales : 1;
+  const need = staffNeed();
+  const staffAdj = G.staff < need ? -25 * (need - G.staff) / need : Math.min(6, (G.staff - need) * 2);
+  const target = clamp(55 + (avgPay - 1) * 600 + staffAdj, 3, 99);
+  const repBefore = G.rep;
+  G.rep = clamp(G.rep + (target - G.rep) * 0.12, 0, 100);
+  if (ev) {
+    const before = G.trust;
+    G.trust = clamp(G.trust + clamp((avgPay - 1.02) * 400, -15, 12), 0, 100);
+    if (avgPay < 1.0) note(`${ev === 2 ? '特日' : 'イベ日'}なのに出ていないと噂に… 信頼度 ${Math.round(before)}→${Math.round(G.trust)}`);
+    else if (avgPay > 1.04) note(`${ev === 2 ? '特日' : 'イベ日'}が大盛況！ 出率 ${pct(avgPay)}、信頼度アップ`);
+  }
+  if (G.staff < need) note(`スタッフ不足（必要 ${need}人）で接客が回らず評判ダウン`);
+
+  G.history.push({ d, visitors, sales, gross, net, avgPay, ev, rain, best: best && best.m.id });
+  if (G.history.length > 60) G.history.shift();
+  G.day++;
+
+  for (const m of MODELS) if (m.release > 0 && m.release <= G.day && !G.seenModels.includes(m.id)) {
+    G.seenModels.push(m.id);
+    note(`新台「${m.name}」(${m.cat}) が登場！ 台入替から導入できます`);
+    toast(`新台「${m.name}」登場！`);
+  }
+  if (G.money < -3000000) {
+    G.over = true; stopAuto();
+    showOver('倒産…', `資金が −300万円を下回りました。<br>${G.day}日間の営業、おつかれさまでした。`, [['最初からやり直す', reset]]);
+  }
+  save();
+  render();
+  const r = G.history[G.history.length - 1];
+  toast(`${fmtDate(d)} 来店 ${r.visitors}人 / 収支 ${man(r.net)}`);
+}
+function note(t) { G.news.unshift({ d: G.day, t }); if (G.news.length > 40) G.news.pop(); }
+
+// ---------- Auto play ----------
+let timer = null;
+function startAuto() { if (timer || G.over) return; timer = setInterval(advanceDay, 1800); renderStatus(); }
+function stopAuto() { clearInterval(timer); timer = null; renderStatus(); }
+document.getElementById('autoBtn').onclick = () => timer ? stopAuto() : startAuto();
+document.getElementById('nextBtn').onclick = () => advanceDay();
+
+// ---------- UI ----------
+const TABS = [['hall', '🎰', 'ホール'], ['set', '🔧', '設定'], ['ev', '📅', 'イベ日'], ['shop', '🛒', '台入替'], ['biz', '🏢', '経営']];
+let tab = 'hall', calMonth = null;
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function render() { renderStatus(); renderTabs(); renderMain(); }
+function renderStatus() {
+  $('shopName').textContent = G.name;
+  $('rank').textContent = `${LEVELS[G.level].name}・${rankName()}`;
+  $('date').textContent = fmtDate(G.day);
+  const ev = eventOf(G.day);
+  $('evBadge').innerHTML = ev === 2 ? '<span class="badge big">特日</span>' : ev === 1 ? '<span class="badge small">イベ日</span>' : '';
+  $('money').textContent = yen(G.money);
+  $('money').className = 'num' + (G.money < 0 ? ' neg' : '');
+  $('repV').textContent = Math.round(G.rep); $('repBar').style.width = G.rep + '%';
+  $('trustV').textContent = Math.round(G.trust); $('trustBar').style.width = G.trust + '%';
+  $('autoBtn').textContent = timer ? '⏸ 停止' : '▶ 自動';
+  $('autoBtn').classList.toggle('on', !!timer);
+}
+function renderTabs() {
+  $('tabs').innerHTML = TABS.map(([id, ic, label]) => `<button data-tab="${id}" class="${tab === id ? 'on' : ''}"><i>${ic}</i>${label}</button>`).join('');
+}
+$('tabs').onclick = e => { const b = e.target.closest('button'); if (!b) return; tab = b.dataset.tab; renderTabs(); renderMain(); $('main').scrollTop = 0; };
+
+function renderMain() {
+  const el = $('main');
+  const keep = el.scrollTop;
+  el.innerHTML = ({ hall: viewHall, set: viewSet, ev: viewEv, shop: viewShop, biz: viewBiz })[tab]();
+  el.scrollTop = keep;
+}
+
+function viewHall() {
+  const h = G.history[G.history.length - 1];
+  const report = h ? `
+    <div class="card">
+      <h3><span>前日の結果 ${fmtDate(h.d)}${h.ev === 2 ? '・特日' : h.ev ? '・イベ日' : ''}${h.rain ? '・雨' : ''}</span></h3>
+      <div class="stats">
+        <div class="stat"><small>来店客</small><b>${h.visitors}人</b></div>
+        <div class="stat"><small>売上</small><b>${man(h.sales)}</b></div>
+        <div class="stat"><small>平均出率</small><b class="${h.avgPay >= 1 ? 'pos' : ''}">${pct(h.avgPay)}</b></div>
+        <div class="stat"><small>粗利</small><b class="${h.gross >= 0 ? 'pos' : 'negc'}">${man(h.gross)}</b></div>
+        <div class="stat"><small>経費</small><b>${man(h.gross - h.net)}</b></div>
+        <div class="stat"><small>収支</small><b class="${h.net >= 0 ? 'pos' : 'negc'}">${man(h.net)}</b></div>
+      </div>
+    </div>` : `<div class="card"><h3>はじめに</h3><p class="muted">「翌日へ」で1日営業します。設定を上げるとお客さんが勝ちやすくなって評判が上がり、下げると店の粗利が増えます。イベ日には「イベ日設定」が自動で入ります。</p></div>`;
+  const floor = G.machines.map(m => {
+    const k = MODEL[m.model].kind;
+    return `<div class="m ${k}${m.pay > 1.06 && m.util > 0.2 ? ' hot' : ''}" style="opacity:${(0.25 + 0.75 * m.util).toFixed(2)}" title="${m.id}番 ${esc(MODEL[m.model].name)}"></div>`;
+  }).join('');
+  const empty = seats() - G.machines.length;
+  return report + `
+    <div class="card">
+      <h3><span>フロア ${G.machines.length}/${seats()}台</span><span>${empty > 0 ? `空き ${empty}台` : '満台'}</span></h3>
+      <div id="floor">${floor}${'<div class="m" style="border:1px dashed var(--line)"></div>'.repeat(Math.max(0, empty))}</div>
+      <div class="legend"><span style="--c:var(--cyan)">スロット</span><span style="--c:var(--pink)">パチンコ</span><span style="--c:var(--gold)">光る＝よく出た台</span><span>濃さ＝稼働率</span></div>
+    </div>
+    <div class="card"><h3><span>収支の推移（直近30日）</span></h3>${chart()}</div>
+    <div class="card"><h3>ニュース</h3><div class="news">${G.news.map(n => `<div><b>${fmtDate(n.d)}</b> ${esc(n.t)}</div>`).join('')}</div></div>`;
+}
+function chart() {
+  const hs = G.history.slice(-30);
+  if (!hs.length) return '<p class="muted">営業すると、ここに毎日の収支が並びます。</p>';
+  const W = 300, H = 110, pad = 14;
+  const max = Math.max(1, ...hs.map(h => Math.abs(h.net)));
+  const zero = H / 2;
+  const bw = (W - pad) / 30;
+  const bars = hs.map((h, i) => {
+    const hgt = Math.abs(h.net) / max * (H / 2 - 12);
+    const y = h.net >= 0 ? zero - hgt : zero;
+    return `<rect x="${pad + i * bw + 1}" y="${y.toFixed(1)}" width="${(bw - 2).toFixed(1)}" height="${Math.max(1, hgt).toFixed(1)}" rx="1.5" fill="${h.net >= 0 ? 'var(--good)' : 'var(--bad)'}"${h.ev ? ' stroke="var(--pink)" stroke-width="1"' : ''}/>`;
+  }).join('');
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+    <line x1="${pad}" x2="${W}" y1="${zero}" y2="${zero}" stroke="var(--line)"/>
+    ${bars}
+    <text x="0" y="10" font-size="8" fill="var(--muted)">+${man(max)}</text>
+    <text x="0" y="${H - 2}" font-size="8" fill="var(--muted)">−${man(max)}</text>
+  </svg><p class="muted">ピンク枠はイベ日。</p>`;
+}
+
+function groups() {
+  const g = {};
+  for (const m of G.machines) (g[m.model] = g[m.model] || []).push(m);
+  return Object.entries(g);
+}
+function viewSet() {
+  const cards = groups().map(([id, ms]) => {
+    const mod = MODEL[id];
+    const uni = key => ms.every(m => m[key] === ms[0][key]) ? ms[0][key] : 0;
+    const chips = (key, cls) => [1, 2, 3, 4, 5, 6].map(s => `<button class="chip ${cls} ${uni(key) === s ? 'on' : ''}" data-act="bulk" data-model="${id}" data-key="${key}" data-v="${s}">${s}</button>`).join('');
+    const seen = ms.reduce((a, m) => a + m.seen, 0) / ms.length, util = ms.reduce((a, m) => a + m.util, 0) / ms.length;
+    const opts = v => [1, 2, 3, 4, 5, 6].map(s => `<option ${s === v ? 'selected' : ''}>${s}</option>`).join('');
+    return `<div class="card model">
+      <div class="mhead"><div class="mname">${esc(mod.name)}<span class="tag ${mod.kind}">${mod.cat}</span></div><div class="muted num">${ms.length}台・稼働 ${Math.round(util * 100)}%・データ出率 ${pct(seen)}</div></div>
+      <div class="chips"><span>通常日</span>${chips('s', '')}</div>
+      <div class="chips"><span>イベ日</span>${chips('e', 'ev')}</div>
+      <details><summary>1台ずつ設定する</summary><div class="units">${ms.map(m => `
+        <div class="unit"><b class="num">${m.id}番</b>
+          <select aria-label="${m.id}番 通常" data-act="one" data-id="${m.id}" data-key="s">${opts(m.s)}</select>
+          <select aria-label="${m.id}番 イベ日" data-act="one" data-id="${m.id}" data-key="e" style="color:var(--pink)">${opts(m.e)}</select>
+        </div>`).join('')}</div></details>
+    </div>`;
+  }).join('');
+  return `<div class="card"><h3>設定のしくみ</h3><p class="muted">${MODEL_NOTE}</p></div>` + (cards || '<p class="muted">台がありません。「台入替」で導入しよう。</p>');
+}
+const MODEL_NOTE = '設定1（辛い）〜6（甘い）。スロットは出率 94〜110%、パチンコは釘調整で 92〜107%。お客さんは最近よく出た台に集まり、店全体の出率が高いと評判が上がります。イベ日はピンクの「イベ日設定」が自動で使われ、イベ日に出すとイベ信頼度が上がって次のイベ日の集客が増えます。';
+
+function viewEv() {
+  const today = dateOf(G.day);
+  if (!calMonth) calMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+  const y = calMonth.getFullYear(), mo = calMonth.getMonth();
+  const first = new Date(y, mo, 1).getDay(), days = new Date(y, mo + 1, 0).getDate();
+  let cells = DOW.map((d, i) => `<div class="dow" style="${i === 0 ? 'color:var(--bad)' : i === 6 ? 'color:var(--cyan)' : ''}">${d}</div>`).join('');
+  cells += '<button class="empty" tabindex="-1"></button>'.repeat(first);
+  for (let dd = 1; dd <= days; dd++) {
+    const di = dayIndex(new Date(y, mo, dd));
+    const ev = di >= 0 ? eventOf(di) : 0;
+    const cls = [di < G.day ? 'past' : '', di === G.day ? 'today' : '', ev ? 'ev' + ev : ''].join(' ');
+    cells += `<button class="${cls}" data-act="day" data-d="${di}" ${di < G.day ? 'disabled' : ''}><span>${dd}</span>${ev ? `<small style="color:${ev === 2 ? 'var(--pink)' : 'var(--cyan)'}">${ev === 2 ? '特日' : 'イベ'}</small>` : ''}</button>`;
+  }
+  const upcoming = [];
+  for (let d = G.day; d < G.day + 31 && upcoming.length < 6; d++) { const e = eventOf(d); if (e) upcoming.push(`${fmtDate(d)} ${e === 2 ? '特日' : 'イベ日'}`); }
+  return `
+    <div class="card">
+      <div class="calhead"><button class="cbtn" data-act="cal" data-v="-1" aria-label="前の月">◀</button><b>${y}年${mo + 1}月</b><button class="cbtn" data-act="cal" data-v="1" aria-label="次の月">▶</button></div>
+      <div class="cal">${cells}</div>
+      <p class="muted">日付をタップ：なし → イベ日 → 特日 → なし。特日はイベ日の約2倍お客さんが期待して来ます。</p>
+    </div>
+    <div class="card"><h3>定期イベント</h3>
+      <select class="full" id="ruleSel" data-act="rule">${RULES.map(r => `<option value="${r.id}" ${G.rule === r.id ? 'selected' : ''}>${r.name}</option>`).join('')}</select>
+      <p class="muted">選んだ日は自動でイベ日（ゾロ目は特日）になります。カレンダーで個別に変えた日はそちらが優先されます。</p>
+    </div>
+    <div class="card"><h3>この先のイベント</h3><p class="muted">${upcoming.join('<br>') || '予定なし'}</p>
+      <p class="muted">イベ信頼度 ${Math.round(G.trust)}：イベ日に出率102%以上を出すと上がり、出し渋ると下がります。</p></div>`;
+}
+
+function viewShop() {
+  const free = seats() - G.machines.length;
+  const items = available().slice().reverse().map(m => {
+    const fresh = G.day - m.release < 30 && m.release > 0;
+    const owned = G.machines.filter(x => x.model === m.id).length;
+    const b = n => `<button class="btn" data-act="buy" data-model="${m.id}" data-n="${n}" ${free < n || G.money < m.price * n ? 'disabled' : ''}>+${n}</button>`;
+    return `<div class="item"><div class="info"><b>${esc(m.name)}<span class="tag ${m.kind}">${m.cat}</span>${fresh ? '<span class="tag new">NEW</span>' : ''}</b>
+      <small class="num">${yen(m.price)}/台・人気 ${popNow(m, G.day).toFixed(2)}・設置 ${owned}台</small></div>
+      <div class="btns">${b(1)}${b(5)}<button class="btn sub" data-act="sell" data-model="${m.id}" ${owned ? '' : 'disabled'}>−1</button></div></div>`;
+  }).join('');
+  const next = MODELS.find(m => m.release > G.day);
+  return `<div class="card"><h3><span>台を導入する</span><span class="num">空き ${free}台</span></h3>${items}
+    <p class="muted">外した台は購入価格の${SELL_BACK * 100}%で売れます。新台は登場直後ほど人気があり、だんだん落ち着きます。</p></div>
+    ${next ? `<div class="card"><h3>新台情報</h3><p class="muted">あと${next.release - G.day}日で「${esc(next.name)}」(${next.cat}) が登場予定。</p></div>` : ''}`;
+}
+
+function viewBiz() {
+  const nl = LEVELS[G.level + 1];
+  const need = staffNeed();
+  const h = G.history.slice(-7);
+  const wk = h.reduce((a, x) => a + x.net, 0);
+  return `
+    <div class="card"><h3>店名</h3><input class="name" id="nameIn" maxlength="16" value="${esc(G.name)}" aria-label="店名"></div>
+    <div class="card"><h3><span>店舗</span><span>${LEVELS[G.level].name}</span></h3>
+      <p class="muted num">台数上限 ${seats()}台・家賃 ${yen(LEVELS[G.level].rent)}/日</p>
+      ${nl ? `<div class="item"><div class="info"><b>${nl.name}へ移転・拡張</b><small class="num">上限 ${nl.seats}台・家賃 ${yen(nl.rent)}/日</small></div>
+        <button class="btn" data-act="expand" ${G.money < nl.cost ? 'disabled' : ''}>${man(nl.cost)}</button></div>` : '<p class="muted">最大規模に到達！</p>'}
+    </div>
+    <div class="card"><h3><span>スタッフ</span><span class="num ${G.staff < need ? 'negc' : ''}">${G.staff}人 / 必要 ${need}人</span></h3>
+      <div class="item"><div class="info"><b>日給 ${yen(STAFF_WAGE)}/人</b><small>台15台ごとに1人必要。多めにいると評判が少し上がります。</small></div>
+      <div class="btns"><button class="btn sub" data-act="staff" data-v="-1" ${G.staff <= 1 ? 'disabled' : ''}>−</button><button class="btn" data-act="staff" data-v="1">＋</button></div></div>
+    </div>
+    <div class="card"><h3>広告</h3>
+      ${ADS.map((a, i) => `<div class="item"><div class="info"><b>${a.name}</b><small class="num">${yen(a.cost)}/日・集客 ×${a.mod.toFixed(2)}</small></div>
+        <button class="btn ${G.ad === i ? '' : 'sub'}" data-act="ad" data-v="${i}">${G.ad === i ? '実施中' : '選ぶ'}</button></div>`).join('')}
+    </div>
+    <div class="card"><h3>成績</h3>
+      <div class="stats">
+        <div class="stat"><small>営業日数</small><b>${G.day}日</b></div>
+        <div class="stat"><small>設置台数</small><b>${G.machines.length}台</b></div>
+        <div class="stat"><small>直近7日収支</small><b class="${wk >= 0 ? 'pos' : 'negc'}">${man(wk)}</b></div>
+      </div>
+      <p class="muted">称号：${rankName()}。台数を増やすと上がります。資金が −300万円を下回ると倒産です。</p>
+      <button class="btn sub" data-act="reset">最初からやり直す</button>
+    </div>`;
+}
+
+// ---------- Actions ----------
+$('main').addEventListener('click', e => {
+  const b = e.target.closest('[data-act]');
+  if (!b || b.tagName === 'SELECT' || b.disabled) return;
+  const a = b.dataset.act;
+  if (a === 'bulk') {
+    for (const m of G.machines) if (m.model === b.dataset.model) m[b.dataset.key] = +b.dataset.v;
+  } else if (a === 'day') {
+    const d = +b.dataset.d;
+    const cur = eventOf(d);
+    const nxt = (cur + 1) % 3;
+    const auto = RULES.find(r => r.id === G.rule).fn(dateOf(d));
+    if (nxt === auto) delete G.manual[d]; else G.manual[d] = nxt;
+  } else if (a === 'cal') {
+    calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + +b.dataset.v, 1);
+  } else if (a === 'buy') {
+    const m = MODEL[b.dataset.model], n = +b.dataset.n;
+    if (seats() - G.machines.length < n || G.money < m.price * n) return;
+    for (let i = 0; i < n; i++) G.machines.push({ id: G.nextId++, model: m.id, s: 1, e: 4, seen: 1.0, util: 0, pay: 0 });
+    G.money -= m.price * n;
+    toast(`「${m.name}」を${n}台導入しました`);
+  } else if (a === 'sell') {
+    const i = G.machines.map(m => m.model).lastIndexOf(b.dataset.model);
+    if (i < 0) return;
+    G.machines.splice(i, 1);
+    G.money += MODEL[b.dataset.model].price * SELL_BACK;
+  } else if (a === 'expand') {
+    const nl = LEVELS[G.level + 1];
+    if (!nl || G.money < nl.cost) return;
+    G.money -= nl.cost; G.level++;
+    note(`${nl.name}にリニューアル！ 最大${nl.seats}台まで置けるように`);
+    toast(`${nl.name}にリニューアル！`);
+  } else if (a === 'staff') {
+    G.staff = Math.max(1, G.staff + +b.dataset.v);
+  } else if (a === 'ad') {
+    G.ad = +b.dataset.v;
+  } else if (a === 'reset') {
+    showOver('やり直しますか？', '今のお店のデータは消えます。', [['やり直す', reset], ['やめる', closeOver, true]]);
+    return;
+  }
+  save(); renderStatus(); renderMain();
+});
+$('main').addEventListener('change', e => {
+  const t = e.target;
+  if (t.dataset.act === 'one') { const m = G.machines.find(x => x.id === +t.dataset.id); if (m) m[t.dataset.key] = +t.value; }
+  else if (t.dataset.act === 'rule') { G.rule = t.value; renderMain(); }
+  else if (t.id === 'nameIn') { G.name = t.value.trim() || 'ホール ラッキー'; renderStatus(); }
+  save(); renderStatus();
+});
+
+let toastT;
+function toast(msg) { const el = $('toast'); el.textContent = msg; el.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove('show'), 1500); }
+function showOver(title, html, btns) {
+  const o = $('over');
+  o.innerHTML = `<div class="card"><h2>${title}</h2><p class="muted" style="font-size:13px">${html}</p><div class="btns" style="justify-content:center">${btns.map(([l], i) => `<button class="btn ${btns[i][2] ? 'sub' : ''}" data-i="${i}">${l}</button>`).join('')}</div></div>`;
+  o.hidden = false;
+  o.querySelectorAll('button').forEach(b => b.onclick = btns[+b.dataset.i][1]);
+}
+function closeOver() { $('over').hidden = true; }
+function reset() { stopAuto(); G = newGame(); calMonth = null; closeOver(); save(); render(); }
+
+G = load() || newGame();
+render();
+</script>
+</body>
+</html>
