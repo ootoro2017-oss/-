@@ -1,0 +1,531 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Pixel Beads</title>
+<style>
+  :root {
+    --bg: #d6cdee;
+    --panel: #fffdf4;
+    --ink: #3b3355;
+    --accent: #7a5cff;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+    font-family: "Hiragino Maru Gothic ProN", "Rounded Mplus 1c", system-ui, sans-serif;
+    overflow: hidden; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+  #hud { position: fixed; top: 0; left: 0; right: 0; display: flex; align-items: center;
+    justify-content: space-between; padding: 12px 16px; gap: 8px; z-index: 2; }
+  #hud .title { font-weight: 800; font-size: 20px; letter-spacing: .02em; }
+  #hud .stats { font-size: 13px; opacity: .8; white-space: nowrap; }
+  #hud > div:last-child { display: flex; gap: 6px; flex-shrink: 0; }
+  .btn { border: 0; border-radius: 999px; padding: 8px 14px; font: inherit; font-weight: 700;
+    background: #fff; color: var(--ink); box-shadow: 0 3px 0 #b9add9; cursor: pointer; }
+  .btn:active { transform: translateY(2px); box-shadow: 0 1px 0 #b9add9; }
+  .btn.primary { background: var(--accent); color: #fff; box-shadow: 0 4px 0 #5238c8; }
+  canvas { display: block; position: fixed; inset: 0; }
+  #toast { position: fixed; left: 50%; top: 64px; transform: translateX(-50%); background: rgba(59,51,85,.9);
+    color: #fff; padding: 8px 16px; border-radius: 999px; font-size: 14px; opacity: 0;
+    transition: opacity .25s; pointer-events: none; z-index: 3; white-space: nowrap; }
+  #toast.show { opacity: 1; }
+  #overlay { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    background: rgba(40,30,70,.45); z-index: 4; padding: 16px; }
+  #overlay.show { display: flex; }
+  #overlay .card { background: var(--panel); border-radius: 24px; padding: 28px 24px; text-align: center;
+    max-width: 340px; width: 100%; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+  #overlay h2 { margin: 0 0 8px; font-size: 28px; }
+  #overlay p { margin: 0 0 20px; line-height: 1.6; }
+  #overlay .row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<div id="hud">
+  <div>
+    <div class="title">Pixel Beads</div>
+    <div class="stats"><span id="lv"></span> ・ スコア <span id="score">0</span></div>
+  </div>
+  <div>
+    <button class="btn" id="helpBtn">？</button>
+    <button class="btn" id="restartBtn">やり直す</button>
+  </div>
+</div>
+<canvas id="cv"></canvas>
+<div id="toast"></div>
+<div id="overlay"><div class="card">
+  <h2 id="ovTitle"></h2>
+  <p id="ovText"></p>
+  <div class="row" id="ovButtons"></div>
+</div></div>
+
+<script>
+// ---------- Palette & levels ----------
+const PALETTE = {
+  'c': '#4fe0ea', // sky cyan
+  'K': '#3a3a40', // black
+  'W': '#f3efe6', // white
+  'g': '#a6d92b', // light green
+  'G': '#1f8a1f', // dark green
+  'y': '#ffd81f', // yellow
+  'r': '#e8364a', // red
+  'R': '#a8182c', // dark red
+  'b': '#8a5a2b', // brown
+  'p': '#ff9ec4', // pink
+  'o': '#ff8a1f', // orange
+  'B': '#3f6fe0', // blue
+  'S': '#bfbfc8', // silver
+};
+
+const LEVELS = [
+  { name: 'りんご', art: [
+    'cccccccccccccccc',
+    'cccccccbbccGGccc',
+    'cccccccbccGGGccc',
+    'ccccccbccGGccccc',
+    'ccccrrrbrrrrcccc',
+    'cccrrrrrrrrrrccc',
+    'ccrrWWrrrrrrrrcc',
+    'ccrWWrrrrrrrrrcc',
+    'ccrWrrrrrrrrRrcc',
+    'ccrrrrrrrrrrRrcc',
+    'ccrrrrrrrrrRRrcc',
+    'cccrrrrrrrRRrccc',
+    'cccrrrrrrRRrrccc',
+    'ccccrrrrrrrrcccc',
+    'cccccrrccrrccccc',
+    'gggggggggggggggg',
+  ]},
+  { name: 'パンダ', art: [
+    'KKKKKKKKKKKKKKKKKKKK',
+    'KcKKKccccccccKKKcKKK',
+    'cKKKKKWWWWWWWWKKKKcK',
+    'cKKKWWWWWWWWWWWWKKcc',
+    'ccKWWWWWWWWWWWWWWKcc',
+    'ccWWWWWWWWWWWWWWWWcc',
+    'cWWKKKWWWWWWWKKKWWWc',
+    'cWKKyKKWWWWWKKyKKWWc',
+    'cWKKKKWWWWWWWKKKKWWc',
+    'cWWKKWWWWKKWWWKKWWWc',
+    'cWWWWWWWKKKKWWWWWWWc',
+    'cWWWWWWWWKKWWWWWWWWc',
+    'ccWWpWWWWWWWWWWpWWcc',
+    'ccWWWWWWKWWKWWWWWWcc',
+    'cccWWWWWWKKWWWWWWccc',
+    'ccccWWWWWWWWWWWWcccc',
+    'gggggGWWWWWWWWGggggg',
+    'gGggKKKWWWWWWKKKggGg',
+    'ggGgKKKKggggKKKKgGgg',
+    'gggggggggggggggggggg',
+  ]},
+  { name: 'きのこ', art: [
+    'cccccccccccccccccc',
+    'cccccccccccccccccc',
+    'ccccccrrrrrrcccccc',
+    'ccccrrWWrrrrrrcccc',
+    'cccrrWWWWrrrWWrccc',
+    'ccrrrWWWrrrWWWWrcc',
+    'ccrrrrrrrrrrWWrrcc',
+    'crrWWrrrrrrrrrrrrc',
+    'crWWWWrrrWWWrrrrrc',
+    'crrWWrrrWWWWWrrWrc',
+    'crrrrrrrrWWWrrWWWc',
+    'cccccWWWWWWWWccccc',
+    'cccccWWKWWKWWccccc',
+    'cccccWWKWWKWWccccc',
+    'cccccWWWWWWWWccccc',
+    'ccGcccWWWWWWcccGcc',
+    'gGgggggggggggggGgg',
+    'gggggggggggggggggg',
+  ]},
+  { name: 'ひまわり', art: [
+    'BBBBBBBBBBBBBBBBBBBBBB',
+    'BBBBBBBBBBBBBBBBBWWBBB',
+    'BBBBBBBByyyBBBBBWWWWBB',
+    'BBBBByyByyyByyBBBBBBBB',
+    'BBBByyyyyyyyyyyBBBBBBB',
+    'BBByyyyobbbboyyyyBBBBB',
+    'BByyyyobbbbbbobyyyBBBB',
+    'BBByyobbKbbKbbbyyyBBBB',
+    'BByyyobbbbbbbbbbyyBBBB',
+    'BByyyobbbKKKbbbyyyBBBB',
+    'BBByyyobbbbbbobyyBBBBB',
+    'BBBByyyobbbboyyyyBBBBB',
+    'BBBBByyyyyyyyyyyBBBBBB',
+    'BBBBBByyByyyByyBBBBBBB',
+    'BBBBBBBBBGGBBBBBBBBBBB',
+    'BBBBBGGGBGGBBBBBBBBBBB',
+    'BBBBBBGGGGGBBBGGGBBBBB',
+    'BBBBBBBBBGGBGGGBBBBBBB',
+    'BBBBBBBBBGGGGBBBBBBBBB',
+    'ggggggggggGGgggggggggg',
+    'gggpggggggGGggggggpggg',
+    'gggggggggggggggggggggg',
+  ]},
+  { name: 'カエル', art: [
+    'cccccccccccccccccccccccc',
+    'ccccccccccccccccccWWcccc',
+    'ccccGGGGcccccGGGGcWWWccc',
+    'cccGWWWWGcccGWWWWGcccccc',
+    'cccGWKKWGcccGWKKWGcccccc',
+    'cccGWKKWGGGGGWKKWGcccccc',
+    'ccGGGWWGGGGGGGWWGGGccccc',
+    'cGGGGGGGGGGGGGGGGGGGcccc',
+    'cGGpGGGGGGGGGGGGGGpGGccc',
+    'cGGGGrrrrrrrrrrrrGGGGccc',
+    'ccGGGGrrrrrrrrrrGGGGcccc',
+    'cccGGGGGGGGGGGGGGGGccccc',
+    'ccccGGggggggggggGGcccccc',
+    'cccGGggggggggggggGGccccc',
+    'ccGGgggggggggggggggGGccc',
+    'ccGGgggggggggggggggGGccc',
+    'cGGGGgggggggggggggGGGGcc',
+    'GGyGGGgggggggggggGGGyGGc',
+    'BBBBBBGGGGGGGGGGGGBBBBBB',
+    'BBBBBBBBBBBBBBBBBBBBBBBB',
+    'BBBGGGBBBBBBBBBBBBBGGGBB',
+    'BBGGGGGBBBBBBBBBBBGGGGGB',
+    'BBBGGGBBBBBBBBBBBBBGGGBB',
+    'BBBBBBBBBBBBBBBBBBBBBBBB',
+  ]},
+];
+
+// ---------- Rules ----------
+const TRAY_COLS = 12, TRAY_ROWS = 5, TRAY_SIZE = TRAY_COLS * TRAY_ROWS;
+const PICK_CAP = 10;   // max beads collected per tap
+const MATCH = 10;      // beads of one color in the tray that get cleared
+
+// ---------- State ----------
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+let DPR = 1, VW = 0, VH = 0;
+let level = 0, score = 0;
+let W = 0, H = 0, grid = [], ghost = [];
+let tray = [];        // {color, x, y, id, delay, popping}
+let particles = [];
+let shakes = [];      // {x,y,t}
+let nextId = 1;
+let state = 'play';   // play | win | lose
+let layout = {};
+const sprites = new Map();
+
+try { level = Math.min(+localStorage.getItem('pb_level') || 0, LEVELS.length - 1); } catch (e) {}
+
+function loadLevel(i) {
+  level = i;
+  const art = LEVELS[i].art;
+  H = art.length;
+  W = Math.max(...art.map(r => r.length));
+  grid = []; ghost = [];
+  for (let y = 0; y < H; y++) {
+    const row = [], grow = [];
+    for (let x = 0; x < W; x++) {
+      const ch = art[y][x] || art[y][art[y].length - 1];
+      const col = PALETTE[ch] || PALETTE.c;
+      row.push(col); grow.push(col);
+    }
+    grid.push(row); ghost.push(grow);
+  }
+  tray = []; particles = []; shakes = [];
+  score = 0;
+  state = 'play';
+  hideOverlay();
+  updateHud();
+  resize();
+  try { localStorage.setItem('pb_level', String(i)); } catch (e) {}
+}
+
+function updateHud() {
+  document.getElementById('lv').textContent = `レベル ${level + 1}「${LEVELS[level].name}」`;
+  document.getElementById('score').textContent = score;
+}
+
+// ---------- Layout ----------
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  VW = window.innerWidth; VH = window.innerHeight;
+  cv.width = VW * DPR; cv.height = VH * DPR;
+  cv.style.width = VW + 'px'; cv.style.height = VH + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+  const pad = 16, top = 72;
+  const maxW = Math.min(VW - pad * 2, 560);
+  // tray
+  const slot = Math.floor(Math.min(maxW / TRAY_COLS, (VH * 0.3) / TRAY_ROWS));
+  const trayW = slot * TRAY_COLS, trayH = slot * TRAY_ROWS;
+  const trayPad = Math.round(slot * 0.35);
+  const trayY = VH - pad - trayH - trayPad * 2;
+  // board
+  const availH = trayY - top - 20;
+  const cell = Math.max(4, Math.floor(Math.min(maxW / W, availH / H)));
+  const boardW = cell * W, boardH = cell * H;
+  layout = {
+    cell, slot, trayPad,
+    bx: Math.round((VW - boardW) / 2), by: Math.round(top + (availH - boardH) / 2),
+    boardW, boardH,
+    tx: Math.round((VW - trayW) / 2), ty: trayY + trayPad, trayW, trayH,
+  };
+  sprites.clear();
+}
+window.addEventListener('resize', resize);
+
+// ---------- Bead sprites ----------
+function shade(hex, amt) {
+  const n = parseInt(hex.slice(1), 16);
+  let r = n >> 16, g = (n >> 8) & 255, b = n & 255;
+  const f = v => Math.max(0, Math.min(255, Math.round(amt >= 0 ? v + (255 - v) * amt : v * (1 + amt))));
+  return `rgb(${f(r)},${f(g)},${f(b)})`;
+}
+function rr(c, x, y, w, h, r) {
+  c.beginPath();
+  c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath();
+}
+function beadSprite(color, size) {
+  const key = color + '|' + size;
+  let s = sprites.get(key);
+  if (s) return s;
+  s = document.createElement('canvas');
+  const px = Math.ceil(size * DPR);
+  s.width = s.height = px;
+  const c = s.getContext('2d');
+  c.scale(DPR, DPR);
+  const m = size * 0.06, w = size - m * 2, r = size * 0.28;
+  rr(c, m, m, w, w, r);
+  c.fillStyle = shade(color, -0.35); c.fill();
+  const g = c.createLinearGradient(0, m, 0, m + w);
+  g.addColorStop(0, shade(color, 0.35)); g.addColorStop(0.55, color); g.addColorStop(1, shade(color, -0.15));
+  rr(c, m + w * 0.07, m + w * 0.05, w * 0.86, w * 0.84, r * 0.8);
+  c.fillStyle = g; c.fill();
+  // facet highlight
+  c.globalAlpha = 0.55;
+  c.beginPath();
+  c.moveTo(size / 2, m + w * 0.18); c.lineTo(m + w * 0.82, size / 2);
+  c.lineTo(size / 2, m + w * 0.78); c.lineTo(m + w * 0.18, size / 2); c.closePath();
+  c.fillStyle = shade(color, 0.22); c.fill();
+  c.globalAlpha = 0.8;
+  c.beginPath(); c.ellipse(m + w * 0.32, m + w * 0.28, w * 0.12, w * 0.07, -0.6, 0, Math.PI * 2);
+  c.fillStyle = '#fff'; c.fill();
+  sprites.set(key, s);
+  return s;
+}
+
+// ---------- Rules ----------
+const inside = (x, y) => x >= 0 && y >= 0 && x < W && y < H;
+function exposed(x, y) {
+  if (x === 0 || y === 0 || x === W - 1 || y === H - 1) return true;
+  return !grid[y - 1][x] || !grid[y + 1][x] || !grid[y][x - 1] || !grid[y][x + 1];
+}
+function collectGroup(sx, sy, cap) {
+  const color = grid[sy][sx];
+  const seen = new Set([sy * W + sx]);
+  const q = [[sx, sy]], out = [];
+  while (q.length && out.length < cap) {
+    const [x, y] = q.shift();
+    out.push([x, y]);
+    for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+      const nx = x + dx, ny = y + dy, k = ny * W + nx;
+      if (inside(nx, ny) && !seen.has(k) && grid[ny][nx] === color) { seen.add(k); q.push([nx, ny]); }
+    }
+  }
+  return out;
+}
+function boardEmpty() {
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (grid[y][x]) return false;
+  return true;
+}
+function sortedTray() {
+  const order = [...new Set(tray.map(b => b.color))];
+  return tray.slice().sort((a, b) => (order.indexOf(a.color) - order.indexOf(b.color)) || (a.id - b.id));
+}
+function slotPos(i) {
+  const { tx, ty, slot } = layout;
+  return { x: tx + (i % TRAY_COLS) * slot, y: ty + Math.floor(i / TRAY_COLS) * slot };
+}
+
+function tap(px, py) {
+  if (state !== 'play') return;
+  const { bx, by, cell } = layout;
+  const x = Math.floor((px - bx) / cell), y = Math.floor((py - by) / cell);
+  if (!inside(x, y) || !grid[y][x]) return;
+  if (!exposed(x, y)) {
+    shakes.push({ x, y, t: 0 });
+    toast('外側か、空いた所のとなりのビーズを取ろう');
+    return;
+  }
+  const free = TRAY_SIZE - tray.length;
+  if (free <= 0) return;
+  const group = collectGroup(x, y, Math.min(PICK_CAP, free));
+  const color = grid[y][x];
+  group.forEach(([gx, gy], i) => {
+    grid[gy][gx] = null;
+    tray.push({ color, id: nextId++, x: bx + gx * cell, y: by + gy * cell,
+      size: cell, delay: i * 0.025 });
+  });
+  if (free < PICK_CAP && group.length === free) toast('トレイがいっぱい！');
+}
+
+function checkMatches() {
+  const counts = {};
+  for (const b of tray) if (!b.popping && b.delay <= 0 && b.settled) (counts[b.color] = (counts[b.color] || 0) + 1);
+  for (const color in counts) {
+    if (counts[color] >= MATCH) {
+      let n = 0;
+      for (const b of tray) if (b.color === color && !b.popping && b.settled && n < MATCH) { b.popping = 0.0001; n++; }
+      score += 100;
+      updateHud();
+    }
+  }
+}
+
+function checkEnd() {
+  if (state !== 'play') return;
+  const busy = tray.some(b => b.popping || !b.settled);
+  if (busy) return;
+  if (boardEmpty()) {
+    state = 'win';
+    score += Math.max(0, (TRAY_SIZE - tray.length) * 10);
+    updateHud();
+    const last = level === LEVELS.length - 1, lv = level;
+    setTimeout(() => state === 'win' && level === lv && showOverlay('クリア！', `「${LEVELS[level].name}」完成！<br>スコア ${score}`,
+      last ? [['最初から', () => loadLevel(0), true]] : [['次のレベル', () => loadLevel(level + 1), true]]), 300);
+  } else if (tray.length >= TRAY_SIZE) {
+    state = 'lose';
+    setTimeout(() => state === 'lose' && showOverlay('トレイが満杯…', '同じ色を10個そろえると消えるよ。<br>もう一度挑戦しよう！',
+      [['やり直す', () => loadLevel(level), true]]), 300);
+  }
+}
+
+// ---------- Loop ----------
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  update(dt); draw(now / 1000);
+  requestAnimationFrame(frame);
+}
+function update(dt) {
+  const sorted = sortedTray();
+  const slot = layout.slot;
+  sorted.forEach((b, i) => {
+    if (b.delay > 0) { b.delay -= dt; return; }
+    const p = slotPos(i);
+    const k = Math.min(1, dt * 10);
+    b.x += (p.x - b.x) * k; b.y += (p.y - b.y) * k; b.size += (slot - b.size) * k;
+    if (Math.abs(p.x - b.x) < 0.5 && Math.abs(p.y - b.y) < 0.5) b.settled = true;
+    else if (!b.popping && Math.abs(p.y - b.y) > slot) b.settled = false;
+    if (b.popping) b.popping += dt;
+  });
+  for (const b of tray) {
+    if (b.popping > 0.25) {
+      for (let i = 0; i < 6; i++) particles.push({ x: b.x + slot / 2, y: b.y + slot / 2,
+        vx: (Math.random() - .5) * 260, vy: (Math.random() - .8) * 260, life: 0.6, color: b.color });
+    }
+  }
+  tray = tray.filter(b => !(b.popping > 0.25));
+  particles.forEach(p => { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 600 * dt; p.life -= dt; });
+  particles = particles.filter(p => p.life > 0);
+  shakes.forEach(s => s.t += dt); shakes = shakes.filter(s => s.t < 0.35);
+  checkMatches();
+  checkEnd();
+}
+
+function draw(t) {
+  ctx.clearRect(0, 0, VW, VH);
+  ctx.fillStyle = '#d6cdee'; ctx.fillRect(0, 0, VW, VH);
+  const { bx, by, cell, boardW, boardH, tx, ty, trayW, trayH, trayPad, slot } = layout;
+
+  // board frame
+  ctx.fillStyle = 'rgba(255,255,255,.35)';
+  rr(ctx, bx - 6, by - 6, boardW + 12, boardH + 12, 10); ctx.fill();
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const c = grid[y][x];
+    let dx = 0;
+    const s = shakes.find(s => s.x === x && s.y === y);
+    if (s) dx = Math.sin(s.t * 60) * cell * 0.15 * (1 - s.t / 0.35);
+    if (c) {
+      ctx.drawImage(beadSprite(c, cell), bx + x * cell + dx, by + y * cell, cell, cell);
+    } else {
+      // faint silhouette of the picture
+      ctx.globalAlpha = 0.18; ctx.fillStyle = ghost[y][x];
+      ctx.fillRect(bx + x * cell + cell * 0.3, by + y * cell + cell * 0.3, cell * 0.4, cell * 0.4);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // tray
+  ctx.fillStyle = '#fffdf4';
+  ctx.shadowColor = 'rgba(80,60,140,.25)'; ctx.shadowBlur = 16; ctx.shadowOffsetY = 4;
+  rr(ctx, tx - trayPad, ty - trayPad, trayW + trayPad * 2, trayH + trayPad * 2, 22); ctx.fill();
+  ctx.shadowColor = 'transparent';
+  for (let i = 0; i < TRAY_SIZE; i++) {
+    const p = slotPos(i);
+    ctx.fillStyle = '#ece6d8';
+    rr(ctx, p.x + slot * 0.1, p.y + slot * 0.1, slot * 0.8, slot * 0.8, slot * 0.25); ctx.fill();
+    ctx.strokeStyle = '#d8c3a0'; ctx.lineWidth = 1.5; ctx.stroke();
+  }
+  // tray fill meter
+  const ratio = tray.length / TRAY_SIZE;
+  ctx.fillStyle = ratio > 0.8 ? '#e8364a' : ratio > 0.6 ? '#ff8a1f' : '#7a5cff';
+  ctx.font = '700 12px system-ui, sans-serif'; ctx.textAlign = 'right';
+  ctx.fillText(`${tray.length} / ${TRAY_SIZE}`, tx + trayW + trayPad - 4, ty - trayPad - 6);
+
+  // tray beads (flying ones drawn on top)
+  const flying = [];
+  for (const b of tray) {
+    if (b.delay > 0) { ctx.drawImage(beadSprite(b.color, Math.round(cell)), b.x, b.y, cell, cell); continue; }
+    if (!b.settled) { flying.push(b); continue; }
+    drawTrayBead(b, t);
+  }
+  for (const b of flying) drawTrayBead(b, t);
+
+  for (const p of particles) {
+    ctx.globalAlpha = Math.max(0, p.life / 0.6); ctx.fillStyle = p.color;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+function drawTrayBead(b, t) {
+  let s = b.size, ox = 0;
+  if (b.popping) { s = b.size * (1 + b.popping * 2); ox = (s - b.size) / 2; ctx.globalAlpha = 1 - b.popping * 3; }
+  ctx.drawImage(beadSprite(b.color, Math.max(4, Math.round(layout.slot))), b.x - ox, b.y - ox, s, s);
+  ctx.globalAlpha = 1;
+}
+
+// ---------- UI ----------
+cv.addEventListener('pointerdown', e => tap(e.clientX, e.clientY));
+document.getElementById('restartBtn').onclick = () => loadLevel(level);
+document.getElementById('helpBtn').onclick = showHelp;
+
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 1600);
+}
+function showOverlay(title, text, buttons) {
+  document.getElementById('ovTitle').textContent = title;
+  document.getElementById('ovText').innerHTML = text;
+  const row = document.getElementById('ovButtons'); row.innerHTML = '';
+  for (const [label, fn, primary] of buttons) {
+    const b = document.createElement('button');
+    b.className = 'btn' + (primary ? ' primary' : ''); b.textContent = label;
+    b.onclick = fn; row.appendChild(b);
+  }
+  document.getElementById('overlay').classList.add('show');
+}
+function hideOverlay() { document.getElementById('overlay').classList.remove('show'); }
+function showHelp() {
+  const prev = state;
+  if (state === 'play') state = 'pause';
+  showOverlay('あそびかた',
+    '外側のビーズ、または空いたマスのとなりのビーズをタップすると、同じ色のビーズが最大10個トレイに入ります。<br>' +
+    'トレイで同じ色が<b>10個</b>そろうと消えます。<br>トレイ(60マス)が満杯になる前に、絵のビーズを全部取りきろう！',
+    [['OK', () => { hideOverlay(); state = prev; }, true]]);
+}
+
+loadLevel(level);
+requestAnimationFrame(frame);
+try { if (!localStorage.getItem('pb_seen_help')) { localStorage.setItem('pb_seen_help', '1'); showHelp(); } }
+catch (e) { showHelp(); }
+</script>
+</body>
+</html>
