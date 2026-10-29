@@ -126,7 +126,7 @@
   input.name { width: 100%; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
 
   /* tabs */
-  nav { display: grid; grid-template-columns: repeat(5, 1fr); border-top: 1px solid var(--line); background: var(--panel);
+  nav { display: grid; grid-template-columns: repeat(6, 1fr); border-top: 1px solid var(--line); background: var(--panel);
     padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
   nav button { background: none; border: 0; padding: 10px 0 12px; font-size: 11px; font-weight: 700; color: var(--muted); display: grid; justify-items: center; gap: 2px; }
   nav button i { font-style: normal; font-size: 18px; line-height: 1; }
@@ -140,6 +140,17 @@
   #over { position: fixed; inset: 0; background: rgba(8,4,16,.7); display: grid; place-items: center; padding: 16px; z-index: 6; }
   #over .card { max-width: 360px; width: 100%; text-align: center; }
   #over h2 { margin: 0; font-family: var(--display); font-weight: 400; color: var(--gold); font-size: 24px; }
+  /* farm */
+  .plots { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .plot { aspect-ratio: 1; border-radius: 10px; border: 1px solid #5a3d22; background: #3a2614; display: grid; place-items: center;
+    align-content: center; gap: 2px; position: relative; overflow: hidden; padding: 0; max-width: 100%; min-width: 0; }
+  .plot span { font-size: 24px; line-height: 1; }
+  .plot small { font-size: 10px; color: var(--muted); }
+  .plot i { position: absolute; left: 0; bottom: 0; height: 4px; background: var(--good); }
+  .plot.empty { background: transparent; border-style: dashed; }
+  .plot.empty span { font-size: 18px; color: var(--muted); }
+  .plot.ready { border-color: var(--gold); box-shadow: 0 0 8px rgba(255,207,58,.5) inset; }
+  .plot.ready small { color: var(--gold); font-weight: 800; }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
@@ -220,12 +231,12 @@ function newGame() {
     name: 'ホール ラッキー', day: 0, money: 3000000, rep: 45, trust: 30, level: 0,
     staff: 2, ad: 0, rule: 'd7', manual: {}, machines, nextId: id,
     history: [], news: [{ d: 0, t: 'オープンしました！ まずは設定とイベ日を決めよう。' }],
-    seenModels: MODELS.filter(m => m.release <= 0).map(m => m.id), over: false,
+    seenModels: MODELS.filter(m => m.release <= 0).map(m => m.id), over: false, farm: newFarm(),
   };
 }
 function save() { try { localStorage.setItem('parlor_v1', JSON.stringify(G)); } catch (e) {} }
 function load() {
-  try { const s = JSON.parse(localStorage.getItem('parlor_v1')); if (s && s.machines) return s; } catch (e) {}
+  try { const s = JSON.parse(localStorage.getItem('parlor_v1')); if (s && s.machines) { if (!s.farm) s.farm = newFarm(); return s; } } catch (e) {}
   return null;
 }
 
@@ -260,7 +271,8 @@ function advanceDay() {
   if (date.getDate() === 25) dayMod *= 1.2;
   const rain = Math.random() < 0.2;
   if (rain) dayMod *= 1.06;
-  const evMod = ev ? 1 + (ev === 2 ? 1.0 : 0.5) * G.trust / 100 : 1;
+  const evMod = ev ? (1 + (ev === 2 ? 1.0 : 0.5) * G.trust / 100) * (1 + G.farm.hallBoost) : 1;
+  if (ev) G.farm.hallBoost = 0;
   const popAvg = M ? G.machines.reduce((a, m) => a + popNow(MODEL[m.model], d), 0) / M : 1;
   const visitors = Math.round(M * 2.2 * (0.05 + G.rep / 100 * 1.6) * Math.sqrt(popAvg) * dayMod * evMod * ADS[G.ad].mod * (0.92 + Math.random() * 0.16));
   // players stay longer at a hall where machines have been paying out
@@ -314,7 +326,9 @@ function advanceDay() {
   }
   if (G.staff < need) note(`スタッフ不足（必要 ${need}人）で接客が回らず評判ダウン`);
 
-  G.history.push({ d, visitors, sales, gross, net, avgPay, ev, rain, best: best && best.m.id });
+  const farmNet = farmDay(d);
+  G.money += farmNet;
+  G.history.push({ d, visitors, sales, gross, net, avgPay, ev, rain, best: best && best.m.id, farmNet });
   if (G.history.length > 60) G.history.shift();
   G.day++;
 
@@ -330,7 +344,7 @@ function advanceDay() {
   save();
   render();
   const r = G.history[G.history.length - 1];
-  toast(`${fmtDate(d)} 来店 ${r.visitors}人 / 収支 ${man(r.net)}`);
+  toast(`${fmtDate(d)} ホール ${man(r.net)} / 農園 ${man(r.farmNet)}`);
 }
 function note(t) { G.news.unshift({ d: G.day, t }); if (G.news.length > 40) G.news.pop(); }
 
@@ -342,7 +356,7 @@ document.getElementById('autoBtn').onclick = () => timer ? stopAuto() : startAut
 document.getElementById('nextBtn').onclick = () => advanceDay();
 
 // ---------- UI ----------
-const TABS = [['hall', '🎰', 'ホール'], ['set', '🔧', '設定'], ['ev', '📅', 'イベ日'], ['shop', '🛒', '台入替'], ['biz', '🏢', '経営']];
+const TABS = [['hall', '🎰', 'ホール'], ['set', '🔧', '設定'], ['ev', '📅', 'イベ日'], ['shop', '🛒', '台入替'], ['farm', '🌾', '農園'], ['biz', '🏢', '経営']];
 let tab = 'hall', calMonth = null;
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -369,7 +383,7 @@ $('tabs').onclick = e => { const b = e.target.closest('button'); if (!b) return;
 function renderMain() {
   const el = $('main');
   const keep = el.scrollTop;
-  el.innerHTML = ({ hall: viewHall, set: viewSet, ev: viewEv, shop: viewShop, biz: viewBiz })[tab]();
+  el.innerHTML = ({ hall: viewHall, set: viewSet, ev: viewEv, shop: viewShop, farm: viewFarm, biz: viewBiz })[tab]();
   el.scrollTop = keep;
 }
 
@@ -524,6 +538,292 @@ function viewBiz() {
     </div>`;
 }
 
+// ---------- Farm ----------
+// grow: days to harvest, yield: units per plot, price: base yen per unit, fresh: days before stock spoils, season: months (1-12) it grows best
+const CROPS = [
+  { id: 'spin',   name: 'ほうれん草', icon: '🥬', unit: '束',   grow: 4,  yield: 80,  price: 200,  seed: 3000,  fresh: 4,   season: [10, 11, 12, 1, 2, 3] },
+  { id: 'tomato', name: 'トマト',     icon: '🍅', unit: '個',   grow: 8,  yield: 300, price: 150,  seed: 8000,  fresh: 7,   season: [5, 6, 7, 8, 9] },
+  { id: 'imo',    name: 'さつまいも', icon: '🍠', unit: '袋',   grow: 10, yield: 150, price: 400,  seed: 9000,  fresh: 60,  season: [8, 9, 10, 11] },
+  { id: 'ichigo', name: 'いちご',     icon: '🍓', unit: 'パック', grow: 12, yield: 200, price: 600,  seed: 25000, fresh: 4,   season: [12, 1, 2, 3, 4, 5] },
+  { id: 'melon',  name: 'メロン',     icon: '🍈', unit: '玉',   grow: 20, yield: 60,  price: 2500, seed: 30000, fresh: 10,  season: [5, 6, 7, 8] },
+  { id: 'rice',   name: 'お米',       icon: '🌾', unit: '袋',   grow: 30, yield: 60,  price: 2500, seed: 20000, fresh: 180, season: [4, 5, 6, 7, 8, 9, 10] },
+];
+const CROP = Object.fromEntries(CROPS.map(c => [c.id, c]));
+const PLOT_PRICE = 300000, PLOT_MAX = 24, HAND_WAGE = 8000, PLOTS_PER_HAND = 6;
+const WHOLESALE = 0.6, EC_OPEN = 100000, SHIP_COST = 300;
+const PRICE_LV = [{ name: '安め', mult: 1.0 }, { name: '普通', mult: 1.3 }, { name: '高め', mult: 1.7 }];
+const FARM_EVENTS = [
+  { id: 'marche',  name: 'マルシェ出店',   cost: 30000,  lead: 2, desc: '在庫を定価の1.3倍で売れる。フォロワーも増える' },
+  { id: 'taiken',  name: '収穫体験ツアー', cost: 60000,  lead: 3, desc: '参加費 ¥1,500/人。フォロワーが大きく増える' },
+  { id: 'matsuri', name: '収穫祭',         cost: 200000, lead: 5, desc: '参加費 ¥2,500/人＋在庫販売。大集客の目玉イベント' },
+];
+const POSTS = [
+  { id: 'field',  name: '畑の様子',         desc: 'フォロワーが少し増える' },
+  { id: 'harvest',name: '収穫報告',         desc: '在庫があると、翌日のECの注文が増える' },
+  { id: 'recipe', name: 'レシピ紹介',       desc: 'フォロワーが増えやすい' },
+  { id: 'event',  name: 'イベント告知',     desc: '予定中の農園イベントの参加者が増える' },
+  { id: 'hall',   name: 'ホールのイベ日告知', desc: '次のイベ日・特日の来店が増える' },
+];
+
+function newFarm() {
+  return {
+    plots: [null, null, null, null], hands: 1, stock: [], followers: 50,
+    ec: false, rating: 3.5, priceLv: { spin: 1, tomato: 1, imo: 1, ichigo: 1, melon: 1, rice: 1 },
+    posted: -1, lastPost: 0, postBoost: 0, eventBoost: 0, hallBoost: 0,
+    events: [], seed: 'spin', view: 'field', log: [],
+  };
+}
+const F = () => G.farm;
+const monthOf = d => dateOf(d).getMonth() + 1;
+const inSeason = (c, d) => c.season.includes(monthOf(d));
+const stockOf = id => F().stock.filter(s => s.crop === id).reduce((a, s) => a + s.qty, 0);
+const handsNeed = () => Math.max(1, Math.ceil(F().plots.length / PLOTS_PER_HAND));
+const ecPrice = id => Math.round(CROP[id].price * PRICE_LV[F().priceLv[id]].mult);
+
+// take units of a crop from the oldest batches first
+function takeStock(id, want) {
+  let got = 0;
+  for (const s of F().stock) {
+    if (s.crop !== id || got >= want) continue;
+    const t = Math.min(s.qty, want - got);
+    s.qty -= t; got += t;
+  }
+  F().stock = F().stock.filter(s => s.qty > 0);
+  return got;
+}
+function sellAllStock(mult, cap) {
+  let rev = 0, units = 0;
+  for (const c of CROPS) {
+    const n = takeStock(c.id, Math.max(0, cap - units));
+    units += n; rev += n * c.price * mult;
+  }
+  return { rev, units };
+}
+function farmNote(t) { F().log.unshift({ d: G.day, t }); if (F().log.length > 30) F().log.pop(); }
+
+// one day of farm business; returns net yen
+function farmDay(d) {
+  const f = F();
+  let income = 0, cost = f.hands * HAND_WAGE;
+  const speed = f.hands >= handsNeed() ? 1 : 0.6;
+  for (const p of f.plots) if (p && p.prog < CROP[p.crop].grow) p.prog = Math.min(CROP[p.crop].grow, p.prog + speed);
+  for (const p of f.plots) if (p && p.prog >= CROP[p.crop].grow) p.ripe = (p.ripe || 0) + 1;
+
+  // spoilage
+  const before = f.stock.length;
+  f.stock = f.stock.filter(s => d - s.day <= CROP[s.crop].fresh);
+  if (f.stock.length < before) farmNote('鮮度が落ちた在庫を廃棄しました');
+
+  // EC orders
+  let orders = 0, ecRev = 0, missed = 0;
+  if (f.ec) {
+    const dow = dateOf(d).getDay();
+    const base = (3 + 25 * Math.log10(1 + f.followers / 300)) * (f.rating / 3.5) * (dow === 0 || dow === 6 ? 1.2 : 1) * (1 + f.postBoost) * (0.8 + Math.random() * 0.4);
+    const n = Math.round(base);
+    for (let i = 0; i < n; i++) {
+      const wts = CROPS.map(c => (2.2 - PRICE_LV[f.priceLv[c.id]].mult) ** 2 * (inSeason(c, d) ? 1.4 : 1));
+      let r = Math.random() * wts.reduce((a, b) => a + b, 0), c = CROPS[0];
+      for (let k = 0; k < CROPS.length; k++) { r -= wts[k]; if (r <= 0) { c = CROPS[k]; break; } }
+      const qty = Math.max(1, Math.round((3000 / c.price) * (0.6 + Math.random() * 0.8)));
+      if (stockOf(c.id) >= qty) { takeStock(c.id, qty); orders++; ecRev += qty * ecPrice(c.id) - SHIP_COST; }
+      else missed++;
+    }
+    const tgt = orders ? 4.6 - missed / (orders + missed) * 2.5 : f.rating - 0.05;
+    f.rating = clamp(f.rating + (tgt - f.rating) * 0.08, 1, 5);
+    income += ecRev;
+  }
+  f.postBoost = 0;
+
+  // scheduled farm events
+  for (const e of f.events.filter(e => e.day === d)) {
+    const def = FARM_EVENTS.find(x => x.id === e.type);
+    const boost = 1 + f.eventBoost;
+    let rev = 0, people = 0, gain = 0;
+    if (e.type === 'marche') {
+      const s = sellAllStock(1.3, Math.round((60 + f.followers / 15) * boost));
+      rev = s.rev; gain = Math.round(15 + Math.random() * 40 * boost);
+      farmNote(`マルシェで ${s.units}点 売れました（${man(rev)}）`);
+    } else if (e.type === 'taiken') {
+      people = Math.round((15 + f.followers / 40) * boost * (0.8 + Math.random() * 0.4));
+      rev = people * 1500; gain = Math.round(people * 1.2);
+      farmNote(`収穫体験に ${people}人 参加（${man(rev)}）`);
+    } else {
+      people = Math.round((60 + f.followers / 12) * boost * (0.8 + Math.random() * 0.4));
+      const s = sellAllStock(1.2, people * 2);
+      rev = people * 2500 + s.rev; gain = Math.round(people * 0.8);
+      farmNote(`収穫祭に ${people}人 来場！ 在庫も ${s.units}点 完売（${man(rev)}）`);
+      toast(`収穫祭に ${people}人 来場！`);
+    }
+    f.followers += gain;
+    income += rev;
+    note(`農園：${def.name} 開催（フォロワー +${gain}）`);
+  }
+  if (f.events.some(e => e.day === d)) f.eventBoost = 0;
+  f.events = f.events.filter(e => e.day > d);
+
+  // followers drift down without posts
+  if (d - f.lastPost > 3) f.followers = Math.max(20, Math.round(f.followers * 0.99));
+
+  const net = income - cost;
+  f.today = { orders, ecRev, missed, net };
+  return net;
+}
+
+function farmAction(a, b) {
+  const f = F();
+  if (a === 'f-view') { f.view = b.dataset.v; return; }
+  if (a === 'f-seed') { f.seed = b.dataset.v; return; }
+  if (a === 'f-plot') {
+    const i = +b.dataset.i, p = f.plots[i], c = CROP[f.seed];
+    if (!p) {
+      if (G.money < c.seed) return toast('お金が足りません');
+      G.money -= c.seed;
+      f.plots[i] = { crop: c.id, prog: 0, ripe: 0, season: inSeason(c, G.day) };
+    } else if (p.prog >= CROP[p.crop].grow) harvest(i);
+    else toast(`${CROP[p.crop].name}：収穫まであと${Math.ceil(CROP[p.crop].grow - p.prog)}日`);
+    return;
+  }
+  if (a === 'f-harvestAll') { let n = 0; f.plots.forEach((p, i) => { if (p && p.prog >= CROP[p.crop].grow) { harvest(i, true); n++; } }); toast(n ? `${n}区画を収穫しました` : '収穫できる畑はありません'); return; }
+  if (a === 'f-buyPlot') {
+    if (f.plots.length >= PLOT_MAX || G.money < PLOT_PRICE) return;
+    G.money -= PLOT_PRICE; f.plots.push(null); toast('畑を1区画広げました'); return;
+  }
+  if (a === 'f-hand') { f.hands = Math.max(1, f.hands + +b.dataset.v); return; }
+  if (a === 'f-whole') {
+    const c = CROP[b.dataset.v], n = takeStock(c.id, Infinity);
+    const rev = n * c.price * WHOLESALE; G.money += rev;
+    toast(`${c.name} ${n}${c.unit} を出荷：${yen(rev)}`); return;
+  }
+  if (a === 'f-ecOpen') {
+    if (G.money < EC_OPEN) return;
+    G.money -= EC_OPEN; f.ec = true; farmNote('ネットショップをオープン！'); toast('ネットショップをオープン！'); return;
+  }
+  if (a === 'f-price') { f.priceLv[b.dataset.v] = (f.priceLv[b.dataset.v] + 1) % PRICE_LV.length; return; }
+  if (a === 'f-post') { post(b.dataset.v); return; }
+  if (a === 'f-event') {
+    const def = FARM_EVENTS.find(x => x.id === b.dataset.v);
+    if (G.money < def.cost || f.events.some(e => e.type === def.id)) return;
+    G.money -= def.cost; f.events.push({ type: def.id, day: G.day + def.lead });
+    toast(`${def.name}を${fmtDate(G.day + def.lead)}に開催します`); return;
+  }
+}
+function harvest(i, quiet) {
+  const f = F(), p = f.plots[i], c = CROP[p.crop];
+  const over = Math.max(0, (p.ripe || 0) - 3); // left too long after ripening
+  const qty = Math.round(c.yield * (p.season ? 1.25 : 0.8) * Math.max(0.3, 1 - over * 0.15) * (0.9 + Math.random() * 0.2));
+  f.stock.push({ crop: c.id, qty, day: G.day });
+  f.plots[i] = null;
+  if (!quiet) toast(`${c.icon} ${c.name} ${qty}${c.unit} 収穫！`);
+}
+function post(type) {
+  const f = F();
+  if (f.posted === G.day) return toast('今日はもう投稿しました');
+  let gain = 3 + Math.sqrt(f.followers) * 0.25, msg = '';
+  if (type === 'field') gain *= 1 + Math.random();
+  if (type === 'recipe') gain *= 1.5 + Math.random() * 1.5;
+  if (type === 'harvest') {
+    if (!f.stock.length) return toast('在庫がないので収穫報告ができません');
+    gain *= 1 + Math.random(); f.postBoost = 0.5; msg = '明日のECの注文が増えそう';
+  }
+  if (type === 'event') {
+    if (!f.events.length) return toast('予定中の農園イベントがありません');
+    gain *= 1 + Math.random(); f.eventBoost = Math.min(1, f.eventBoost + 0.3); msg = 'イベント参加者が増えそう';
+  }
+  if (type === 'hall') {
+    gain *= 0.5 + Math.random(); f.hallBoost = Math.min(0.6, f.hallBoost + 0.1 + f.followers / 20000); msg = '次のイベ日の来店が増えそう';
+  }
+  const viral = Math.random() < 0.06;
+  if (viral) gain *= 6;
+  gain = Math.round(gain);
+  f.followers += gain; f.posted = G.day; f.lastPost = G.day;
+  toast(`${viral ? 'バズった！ ' : ''}フォロワー +${gain}${msg ? '・' + msg : ''}`);
+  farmNote(`SNS「${POSTS.find(p => p.id === type).name}」投稿 フォロワー +${gain}${viral ? '（バズ）' : ''}`);
+}
+
+function viewFarm() {
+  const f = F();
+  const seg = [['field', '畑'], ['sell', '在庫・出荷'], ['ec', 'EC'], ['sns', 'SNS・イベント']]
+    .map(([v, l]) => `<button class="cbtn ${f.view === v ? 'on' : ''}" data-act="f-view" data-v="${v}">${l}</button>`).join('');
+  const t = f.today;
+  const head = `<div class="card"><div class="chips" style="gap:6px">${seg}</div>
+    <div class="stats">
+      <div class="stat"><small>フォロワー</small><b>${f.followers.toLocaleString('ja-JP')}</b></div>
+      <div class="stat"><small>ECの評価</small><b>${f.ec ? '★' + f.rating.toFixed(1) : '未開店'}</b></div>
+      <div class="stat"><small>前日の農園収支</small><b class="${t && t.net < 0 ? 'negc' : 'pos'}">${t ? man(t.net) : '—'}</b></div>
+    </div></div>`;
+  return head + ({ field: farmField, sell: farmSell, ec: farmEc, sns: farmSns })[f.view]();
+}
+function farmField() {
+  const f = F(), d = G.day;
+  const seeds = CROPS.map(c => `<button class="cbtn ${f.seed === c.id ? 'on' : ''}" data-act="f-seed" data-v="${c.id}">${c.icon}${c.name}${inSeason(c, d) ? '<small style="color:var(--gold)"> 旬</small>' : ''}</button>`).join('');
+  const sc = CROP[f.seed];
+  const plots = f.plots.map((p, i) => {
+    if (!p) return `<button class="plot empty" data-act="f-plot" data-i="${i}"><span>＋</span><small>植える</small></button>`;
+    const c = CROP[p.crop], ready = p.prog >= c.grow;
+    return `<button class="plot ${ready ? 'ready' : ''}" data-act="f-plot" data-i="${i}"><span>${ready ? c.icon : '🌱'}</span>
+      <small>${ready ? (p.ripe > 3 ? '熟れすぎ！' : '収穫') : `あと${Math.ceil(c.grow - p.prog)}日`}</small>
+      <i style="width:${Math.min(100, p.prog / c.grow * 100)}%"></i></button>`;
+  }).join('');
+  const need = handsNeed();
+  return `<div class="card"><h3><span>植える作物</span></h3><div class="chips" style="gap:6px">${seeds}</div>
+      <p class="muted">${sc.icon}${sc.name}：種苗代 ${yen(sc.seed)}・${sc.grow}日で収穫・約${sc.yield}${sc.unit}（旬は1.25倍、旬以外は0.8倍）・定価 ${yen(sc.price)}/${sc.unit}・日持ち ${sc.fresh}日</p></div>
+    <div class="card"><h3><span>畑 ${f.plots.length}区画</span><button class="btn" data-act="f-harvestAll">まとめて収穫</button></h3>
+      <div class="plots">${plots}</div>
+      <p class="muted">空いた畑をタップで植え付け、育った畑をタップで収穫。熟してから3日以上放っておくと収穫量が減ります。</p></div>
+    <div class="card"><h3>農園の拡大</h3>
+      <div class="item"><div class="info"><b>畑を1区画広げる</b><small class="num">${f.plots.length}/${PLOT_MAX}区画</small></div>
+        <button class="btn" data-act="f-buyPlot" ${f.plots.length >= PLOT_MAX || G.money < PLOT_PRICE ? 'disabled' : ''}>${man(PLOT_PRICE)}</button></div>
+      <div class="item"><div class="info"><b>農作業スタッフ ${f.hands}人 / 必要 ${need}人</b><small>日給 ${yen(HAND_WAGE)}・${PLOTS_PER_HAND}区画ごとに1人。足りないと育ちが遅くなります</small></div>
+        <div class="btns"><button class="btn sub" data-act="f-hand" data-v="-1" ${f.hands <= 1 ? 'disabled' : ''}>−</button><button class="btn" data-act="f-hand" data-v="1">＋</button></div></div>
+    </div>`;
+}
+function farmSell() {
+  const f = F();
+  const rows = CROPS.map(c => {
+    const n = stockOf(c.id);
+    const oldest = f.stock.filter(s => s.crop === c.id).reduce((a, s) => Math.min(a, s.day), Infinity);
+    const left = n ? c.fresh - (G.day - oldest) : 0;
+    return `<div class="item"><div class="info"><b>${c.icon} ${c.name} <span class="num">${n}${c.unit}</span></b>
+      <small class="num">${n ? `いちばん古い在庫はあと${left}日で廃棄・` : ''}JA出荷 ${yen(c.price * WHOLESALE)}/${c.unit}</small></div>
+      <button class="btn sub" data-act="f-whole" data-v="${c.id}" ${n ? '' : 'disabled'}>全部出荷</button></div>`;
+  }).join('');
+  return `<div class="card"><h3>在庫</h3>${rows}
+    <p class="muted">JA出荷はすぐ現金になりますが、定価の${WHOLESALE * 100}%です。ECやマルシェで売るほうが高く売れます。</p></div>
+    <div class="card"><h3>農園ニュース</h3><div class="news">${f.log.map(n => `<div><b>${fmtDate(n.d)}</b> ${esc(n.t)}</div>`).join('') || '<div>まだありません</div>'}</div></div>`;
+}
+function farmEc() {
+  const f = F();
+  if (!f.ec) return `<div class="card"><h3>ネットショップ</h3>
+    <p class="muted">自分のネットショップを開くと、フォロワーと評価に応じて毎日注文が入り、在庫から自動で発送されます（送料 ${yen(SHIP_COST)}/件は店負担）。</p>
+    <button class="btn" data-act="f-ecOpen" ${G.money < EC_OPEN ? 'disabled' : ''}>${man(EC_OPEN)}でオープンする</button></div>`;
+  const t = f.today || { orders: 0, ecRev: 0, missed: 0 };
+  const rows = CROPS.map(c => `<div class="item"><div class="info"><b>${c.icon} ${c.name}</b>
+      <small class="num">在庫 ${stockOf(c.id)}${c.unit}・販売価格 ${yen(ecPrice(c.id))}/${c.unit}</small></div>
+      <button class="btn ${f.priceLv[c.id] === 2 ? '' : 'sub'}" data-act="f-price" data-v="${c.id}">${PRICE_LV[f.priceLv[c.id]].name}</button></div>`).join('');
+  return `<div class="card"><h3>前日のEC</h3><div class="stats">
+      <div class="stat"><small>注文</small><b>${t.orders}件</b></div>
+      <div class="stat"><small>売上</small><b>${man(t.ecRev)}</b></div>
+      <div class="stat"><small>品切れ</small><b class="${t.missed ? 'negc' : ''}">${t.missed}件</b></div></div>
+      <p class="muted">品切れが多いと評価が下がり、評価が下がると注文も減ります。旬の作物はよく売れます。</p></div>
+    <div class="card"><h3><span>価格設定</span><span>タップで切替</span></h3>${rows}
+      <p class="muted">高めにすると1件の売上は増えますが、注文が入りにくくなります。</p></div>`;
+}
+function farmSns() {
+  const f = F();
+  const done = f.posted === G.day;
+  const posts = POSTS.map(p => `<div class="item"><div class="info"><b>${p.name}</b><small>${p.desc}</small></div>
+    <button class="btn" data-act="f-post" data-v="${p.id}" ${done ? 'disabled' : ''}>投稿</button></div>`).join('');
+  const evs = FARM_EVENTS.map(e => {
+    const sch = f.events.find(x => x.type === e.id);
+    return `<div class="item"><div class="info"><b>${e.name}</b><small>${sch ? `${fmtDate(sch.day)} 開催予定` : `${e.desc}・${e.lead}日後に開催`}</small></div>
+      <button class="btn" data-act="f-event" data-v="${e.id}" ${sch || G.money < e.cost ? 'disabled' : ''}>${man(e.cost)}</button></div>`;
+  }).join('');
+  return `<div class="card"><h3><span>SNS投稿（1日1回）</span><span>${done ? '今日は投稿済み' : '未投稿'}</span></h3>${posts}
+      <p class="muted">ホールと農園で同じアカウント。3日以上投稿しないとフォロワーが少しずつ減ります。たまにバズります。${f.hallBoost ? `<br>次のイベ日の来店 +${Math.round(f.hallBoost * 100)}%（告知効果）` : ''}</p></div>
+    <div class="card"><h3>農園イベント</h3>${evs}
+      <p class="muted">開催前に「イベント告知」を投稿すると参加者が増えます。</p></div>`;
+}
+
 // ---------- Actions ----------
 $('main').addEventListener('click', e => {
   const b = e.target.closest('[data-act]');
@@ -560,6 +860,8 @@ $('main').addEventListener('click', e => {
     G.staff = Math.max(1, G.staff + +b.dataset.v);
   } else if (a === 'ad') {
     G.ad = +b.dataset.v;
+  } else if (a.startsWith('f-')) {
+    farmAction(a, b);
   } else if (a === 'reset') {
     showOver('やり直しますか？', '今のお店のデータは消えます。', [['やり直す', reset], ['やめる', closeOver, true]]);
     return;
