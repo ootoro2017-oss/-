@@ -41,7 +41,9 @@
   #shopName { font-family: var(--display); font-size: 18px; color: var(--gold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     text-shadow: 0 0 12px rgba(255,207,58,.45); min-width: 0; }
   #rank { font-size: 11px; color: var(--muted); white-space: nowrap; }
-  .row2 { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .row2 { display: flex; gap: 10px; align-items: center; flex-wrap: nowrap; white-space: nowrap; }
+  .badges { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; min-height: 20px; margin-top: -4px; }
+  .badges .calm { font-size: 11px; color: var(--muted); }
   #date { font-weight: 700; }
   .badge { font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 999px; letter-spacing: .04em; }
   .badge.big { background: var(--pink); color: #fff; box-shadow: 0 0 10px var(--pink); }
@@ -162,7 +164,8 @@
 <body>
 <header id="status">
   <div class="row1"><div id="shopName"></div><div id="rank"></div></div>
-  <div class="row2"><span id="date"></span><span id="wx"></span><span id="evBadge"></span><span id="money" class="num"></span></div>
+  <div class="row2"><span id="date"></span><span id="wx"></span><span id="money" class="num"></span></div>
+  <div class="badges" id="evBadge"></div>
   <div class="row3">
     <div class="meter"><label><span>評判</span><span id="repV" class="num"></span></label><div class="bar"><i id="repBar" style="background:var(--gold)"></i></div></div>
     <div class="meter"><label><span>イベ信頼度</span><span id="trustV" class="num"></span></label><div class="bar"><i id="trustBar" style="background:var(--pink)"></i></div></div>
@@ -385,7 +388,7 @@ function renderStatus() {
   $('date').textContent = fmtDate(G.day);
   const ev = eventOf(G.day);
   $('wx').textContent = wx().icon + wx().name;
-  $('evBadge').innerHTML = (G.writerDay === G.day ? '<span class="badge big">取材</span> ' : '') + (rivalEventOf(G.day) ? '<span class="badge rival">ライバルイベ</span> ' : '') + (ev === 2 ? '<span class="badge big">特日</span>' : ev === 1 ? '<span class="badge small">イベ日</span>' : '');
+  $('evBadge').innerHTML = ((G.writerDay === G.day ? '<span class="badge big">取材</span> ' : '') + (rivalEventOf(G.day) ? '<span class="badge rival">ライバルイベ</span> ' : '') + (ev === 2 ? '<span class="badge big">特日</span>' : ev === 1 ? '<span class="badge small">イベ日</span>' : '')) || '<span class="calm">通常営業</span>';
   $('money').textContent = yen(G.money);
   $('money').className = 'num' + (G.money < 0 ? ' neg' : '');
   $('repV').textContent = Math.round(G.rep); $('repBar').style.width = G.rep + '%';
