@@ -154,6 +154,8 @@
   .plot.empty span { font-size: 18px; color: var(--muted); }
   .plot.ready { border-color: var(--gold); box-shadow: 0 0 8px rgba(255,207,58,.5) inset; }
   .plot.ready small { color: var(--gold); font-weight: 800; }
+  .plot .soil { position: absolute; top: 3px; left: 4px; font-size: 9px; font-style: normal; font-weight: 800; color: #c9a67a; }
+  .plot.soilmode { border-color: #c9a67a; }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
@@ -340,8 +342,8 @@ function advanceDay() {
   }
   if (G.staff < need) note(`スタッフ不足（必要 ${need}人）で接客が回らず評判ダウン`);
 
-  const farmNet = farmDay(d);
-  G.money += farmNet;
+  G.money += farmDay(d);
+  const farmNet = G.farm.today.net;
   G.history.push({ d, visitors, sales, gross, net, avgPay, ev, rain, best: best && best.m.id, farmNet, wx: G.weather, rev });
   if (G.history.length > 60) G.history.shift();
   afterDay(d, G.history[G.history.length - 1]);
@@ -566,9 +568,25 @@ const CROPS = [
   { id: 'ichigo', name: 'いちご',     icon: '🍓', unit: 'パック', grow: 12, yield: 200, price: 600,  seed: 25000, fresh: 4,   season: [12, 1, 2, 3, 4, 5] },
   { id: 'melon',  name: 'メロン',     icon: '🍈', unit: '玉',   grow: 20, yield: 60,  price: 2500, seed: 30000, fresh: 10,  season: [5, 6, 7, 8] },
   { id: 'rice',   name: 'お米',       icon: '🌾', unit: '袋',   grow: 30, yield: 60,  price: 2500, seed: 20000, fresh: 180, season: [4, 5, 6, 7, 8, 9, 10] },
+  { id: 'budou',  name: '高級ぶどう', icon: '🍇', unit: '房',   grow: 25, yield: 80,  price: 3500, seed: 60000, fresh: 8,   season: [7, 8, 9, 10] },
 ];
+// farm rank that unlocks each crop
+const CROP_LV = { spin: 0, tomato: 0, imo: 0, ichigo: 1, melon: 2, rice: 3, budou: 4 };
 const CROP = Object.fromEntries(CROPS.map(c => [c.id, c]));
-const PLOT_PRICE = 300000, PLOT_MAX = 24, HAND_WAGE = 8000, PLOTS_PER_HAND = 6;
+const PLOT_PRICE = 300000, HAND_WAGE = 8000, PLOTS_PER_HAND = 6, SOIL_MAX = 5, SOIL_COST = 50000;
+const FARM_LV = [
+  { name: '家庭菜園',   plots: 6,  mult: 1.00, cost: 0 },
+  { name: '小さな農園', plots: 10, mult: 1.10, cost: 1000000 },
+  { name: '認定農家',   plots: 16, mult: 1.20, cost: 4000000 },
+  { name: '農業法人',   plots: 24, mult: 1.35, cost: 12000000 },
+  { name: '大農場',     plots: 36, mult: 1.50, cost: 30000000 },
+];
+const FACILITIES = [
+  { id: 'house',   name: 'ビニールハウス', cost: 1500000, minLv: 1, desc: '旬以外でも収穫量が落ちない。台風の被害も半分に' },
+  { id: 'water',   name: '自動水やり設備', cost: 2500000, minLv: 2, desc: '作物が1.25倍速く育つ' },
+  { id: 'cold',    name: '冷蔵倉庫',       cost: 3000000, minLv: 2, desc: '在庫の日持ちが2倍' },
+  { id: 'tractor', name: 'トラクター',     cost: 5000000, minLv: 3, desc: 'スタッフ1人で12区画まで見られる' },
+];
 const WHOLESALE = 0.6, EC_OPEN = 100000, SHIP_COST = 300;
 const PRICE_LV = [{ name: '安め', mult: 1.0 }, { name: '普通', mult: 1.3 }, { name: '高め', mult: 1.7 }];
 const FARM_EVENTS = [
@@ -596,7 +614,11 @@ const F = () => G.farm;
 const monthOf = d => dateOf(d).getMonth() + 1;
 const inSeason = (c, d) => c.season.includes(monthOf(d));
 const stockOf = id => F().stock.filter(s => s.crop === id).reduce((a, s) => a + s.qty, 0);
-const handsNeed = () => Math.max(1, Math.ceil(F().plots.length / PLOTS_PER_HAND));
+const hasFac = id => !!(F().fac && F().fac[id]);
+const handsNeed = () => Math.max(1, Math.ceil(F().plots.length / (PLOTS_PER_HAND * (hasFac('tractor') ? 2 : 1))));
+const freshDays = c => c.fresh * (hasFac('cold') ? 2 : 1);
+const plotCap = () => FARM_LV[F().lv].plots;
+const cropOpen = c => F().lv >= CROP_LV[c.id];
 const ecPrice = id => Math.round(CROP[id].price * PRICE_LV[F().priceLv[id]].mult);
 
 // take units of a crop from the oldest batches first
@@ -624,13 +646,13 @@ function farmNote(t) { F().log.unshift({ d: G.day, t }); if (F().log.length > 30
 function farmDay(d) {
   const f = F();
   let income = 0, cost = f.hands * HAND_WAGE;
-  const speed = (f.hands >= handsNeed() ? 1 : 0.6) * wx().grow;
+  const speed = (f.hands >= handsNeed() ? 1 : 0.6) * wx().grow * (hasFac('water') ? 1.25 : 1);
   for (const p of f.plots) if (p && p.prog < CROP[p.crop].grow) p.prog = Math.min(CROP[p.crop].grow, p.prog + speed);
   for (const p of f.plots) if (p && p.prog >= CROP[p.crop].grow) p.ripe = (p.ripe || 0) + 1;
 
   // spoilage
   const before = f.stock.length;
-  f.stock = f.stock.filter(s => d - s.day <= CROP[s.crop].fresh);
+  f.stock = f.stock.filter(s => d - s.day <= freshDays(CROP[s.crop]));
   if (f.stock.length < before) farmNote('鮮度が落ちた在庫を廃棄しました');
 
   // EC orders
@@ -640,7 +662,7 @@ function farmDay(d) {
     const base = (3 + 25 * Math.log10(1 + f.followers / 300)) * (f.rating / 3.5) * (dow === 0 || dow === 6 ? 1.2 : 1) * (1 + f.postBoost) * (0.8 + Math.random() * 0.4);
     const n = Math.round(base);
     for (let i = 0; i < n; i++) {
-      const wts = CROPS.map(c => (2.2 - PRICE_LV[f.priceLv[c.id]].mult) ** 2 * (inSeason(c, d) ? 1.4 : 1));
+      const wts = CROPS.map(c => cropOpen(c) ? (2.2 - PRICE_LV[f.priceLv[c.id]].mult) ** 2 * (inSeason(c, d) ? 1.4 : 1) : 0);
       let r = Math.random() * wts.reduce((a, b) => a + b, 0), c = CROPS[0];
       for (let k = 0; k < CROPS.length; k++) { r -= wts[k]; if (r <= 0) { c = CROPS[k]; break; } }
       const qty = Math.max(1, Math.round((3000 / c.price) * (0.6 + Math.random() * 0.8)));
@@ -684,16 +706,39 @@ function farmDay(d) {
   if (d - f.lastPost > 3) f.followers = Math.max(20, Math.round(f.followers * 0.99));
 
   const net = income - cost;
-  f.today = { orders, ecRev, missed, net };
+  // JA shipments were paid out when shipped; count them in the day's farm result
+  f.today = { orders, ecRev, missed, net: net + (f.shipped || 0) };
+  f.shipped = 0;
   return net;
 }
 
 function farmAction(a, b) {
   const f = F();
   if (a === 'f-view') { f.view = b.dataset.v; return; }
-  if (a === 'f-seed') { f.seed = b.dataset.v; return; }
+  if (a === 'f-seed') { if (cropOpen(CROP[b.dataset.v])) f.seed = b.dataset.v; else toast(`${FARM_LV[CROP_LV[b.dataset.v]].name}で解放されます`); return; }
+  if (a === 'f-mode') { f.mode = b.dataset.v; return; }
+  if (a === 'f-lv') {
+    const nl = FARM_LV[f.lv + 1];
+    if (!nl || G.money < nl.cost) return;
+    G.money -= nl.cost; f.lv++;
+    const opened = CROPS.filter(c => CROP_LV[c.id] === f.lv).map(c => c.name);
+    note(`農園が「${nl.name}」にランクアップ！${opened.length ? ` ${opened.join('・')}が植えられるように` : ''}`);
+    toast(`農園が「${nl.name}」に！`); return;
+  }
+  if (a === 'f-fac') {
+    const fc = FACILITIES.find(x => x.id === b.dataset.v);
+    if (hasFac(fc.id) || f.lv < fc.minLv || G.money < fc.cost) return;
+    G.money -= fc.cost; f.fac[fc.id] = true; toast(`${fc.name}を導入しました`); return;
+  }
   if (a === 'f-plot') {
     const i = +b.dataset.i, p = f.plots[i], c = CROP[f.seed];
+    if (f.mode === 'soil') {
+      const lv = f.soil[i] || 1, cost = SOIL_COST * lv;
+      if (lv >= SOIL_MAX) return toast('この区画の土は最高レベルです');
+      if (G.money < cost) return toast(`土づくりには ${man(cost)} 必要です`);
+      G.money -= cost; f.soil[i] = lv + 1;
+      toast(`${i + 1}番の区画が 土Lv${lv + 1} に（収穫量 +${lv * 10}%）`); return;
+    }
     if (!p) {
       if (G.money < c.seed) return toast('お金が足りません');
       G.money -= c.seed;
@@ -704,13 +749,13 @@ function farmAction(a, b) {
   }
   if (a === 'f-harvestAll') { let n = 0; f.plots.forEach((p, i) => { if (p && p.prog >= CROP[p.crop].grow) { harvest(i, true); n++; } }); toast(n ? `${n}区画を収穫しました` : '収穫できる畑はありません'); return; }
   if (a === 'f-buyPlot') {
-    if (f.plots.length >= PLOT_MAX || G.money < PLOT_PRICE) return;
-    G.money -= PLOT_PRICE; f.plots.push(null); toast('畑を1区画広げました'); return;
+    if (f.plots.length >= plotCap() || G.money < PLOT_PRICE) return;
+    G.money -= PLOT_PRICE; f.plots.push(null); f.soil.push(1); toast('畑を1区画広げました'); return;
   }
   if (a === 'f-hand') { f.hands = Math.max(1, f.hands + +b.dataset.v); return; }
   if (a === 'f-whole') {
     const c = CROP[b.dataset.v], n = takeStock(c.id, Infinity);
-    const rev = n * c.price * WHOLESALE; G.money += rev;
+    const rev = n * c.price * WHOLESALE; G.money += rev; f.shipped = (f.shipped || 0) + rev;
     toast(`${c.name} ${n}${c.unit} を出荷：${yen(rev)}`); return;
   }
   if (a === 'f-ecOpen') {
@@ -729,7 +774,8 @@ function farmAction(a, b) {
 function harvest(i, quiet) {
   const f = F(), p = f.plots[i], c = CROP[p.crop];
   const over = Math.max(0, (p.ripe || 0) - 3); // left too long after ripening
-  const qty = Math.round(c.yield * (p.season ? 1.25 : 0.8) * Math.max(0.3, 1 - over * 0.15) * (0.9 + Math.random() * 0.2));
+  const soil = 1 + ((f.soil[i] || 1) - 1) * 0.1;
+  const qty = Math.round(c.yield * (p.season ? 1.25 : hasFac('house') ? 1 : 0.8) * FARM_LV[f.lv].mult * soil * Math.max(0.3, 1 - over * 0.15) * (0.9 + Math.random() * 0.2));
   f.stock.push({ crop: c.id, qty, day: G.day });
   f.plots[i] = null;
   if (!quiet) toast(`${c.icon} ${c.name} ${qty}${c.unit} 収穫！`);
@@ -775,34 +821,52 @@ function viewFarm() {
 }
 function farmField() {
   const f = F(), d = G.day;
-  const seeds = CROPS.map(c => `<button class="cbtn ${f.seed === c.id ? 'on' : ''}" data-act="f-seed" data-v="${c.id}">${c.icon}${c.name}${inSeason(c, d) ? '<small style="color:var(--gold)"> 旬</small>' : ''}</button>`).join('');
+  const seeds = CROPS.map(c => cropOpen(c)
+    ? `<button class="cbtn ${f.seed === c.id ? 'on' : ''}" data-act="f-seed" data-v="${c.id}">${c.icon}${c.name}${inSeason(c, d) ? '<small style="color:var(--gold)"> 旬</small>' : ''}</button>`
+    : `<button class="cbtn" style="opacity:.45" data-act="f-seed" data-v="${c.id}">🔒${c.name}</button>`).join('');
   const sc = CROP[f.seed];
   const plots = f.plots.map((p, i) => {
-    if (!p) return `<button class="plot empty" data-act="f-plot" data-i="${i}"><span>＋</span><small>植える</small></button>`;
+    const soil = `<em class="soil">土${f.soil[i] || 1}</em>`;
+    if (f.mode === 'soil') return `<button class="plot soilmode" data-act="f-plot" data-i="${i}">${soil}<span>${(f.soil[i] || 1) >= SOIL_MAX ? '⭐' : '⛏️'}</span><small>${(f.soil[i] || 1) >= SOIL_MAX ? '最高' : man(SOIL_COST * (f.soil[i] || 1))}</small></button>`;
+    if (!p) return `<button class="plot empty" data-act="f-plot" data-i="${i}">${soil}<span>＋</span><small>植える</small></button>`;
     const c = CROP[p.crop], ready = p.prog >= c.grow;
-    return `<button class="plot ${ready ? 'ready' : ''}" data-act="f-plot" data-i="${i}"><span>${ready ? c.icon : '🌱'}</span>
+    return `<button class="plot ${ready ? 'ready' : ''}" data-act="f-plot" data-i="${i}">${soil}<span>${ready ? c.icon : '🌱'}</span>
       <small>${ready ? (p.ripe > 3 ? '熟れすぎ！' : '収穫') : `あと${Math.ceil(c.grow - p.prog)}日`}</small>
       <i style="width:${Math.min(100, p.prog / c.grow * 100)}%"></i></button>`;
   }).join('');
   const need = handsNeed();
   return `<div class="card"><h3><span>植える作物</span></h3><div class="chips" style="gap:6px">${seeds}</div>
-      <p class="muted">${sc.icon}${sc.name}：種苗代 ${yen(sc.seed)}・${sc.grow}日で収穫・約${sc.yield}${sc.unit}（旬は1.25倍、旬以外は0.8倍）・定価 ${yen(sc.price)}/${sc.unit}・日持ち ${sc.fresh}日</p></div>
+      <p class="muted">${sc.icon}${sc.name}：種苗代 ${yen(sc.seed)}・${sc.grow}日で収穫・約${sc.yield}${sc.unit}（旬は1.25倍、旬以外は${hasFac('house') ? '1.0' : '0.8'}倍）・定価 ${yen(sc.price)}/${sc.unit}・日持ち ${freshDays(sc)}日</p></div>
     <div class="card"><h3><span>畑 ${f.plots.length}区画</span><button class="btn" data-act="f-harvestAll">まとめて収穫</button></h3>
+      <div class="chips" style="gap:6px"><button class="cbtn ${f.mode !== 'soil' ? 'on' : ''}" data-act="f-mode" data-v="plant">🌱 植える・収穫</button><button class="cbtn ${f.mode === 'soil' ? 'on' : ''}" data-act="f-mode" data-v="soil">⛏️ 土づくり</button></div>
       <div class="plots">${plots}</div>
-      <p class="muted">空いた畑をタップで植え付け、育った畑をタップで収穫。熟してから3日以上放っておくと収穫量が減ります。</p></div>
+      <p class="muted">${f.mode === 'soil' ? `区画をタップすると土のレベルが上がります（最大Lv${SOIL_MAX}・1レベルごとに収穫量 +10%）。作物を植えたままでも改良できます。` : '空いた畑をタップで植え付け、育った畑をタップで収穫。熟してから3日以上放っておくと収穫量が減ります。'}</p></div>
+    ${farmLvCard()}
     <div class="card"><h3>農園の拡大</h3>
-      <div class="item"><div class="info"><b>畑を1区画広げる</b><small class="num">${f.plots.length}/${PLOT_MAX}区画</small></div>
-        <button class="btn" data-act="f-buyPlot" ${f.plots.length >= PLOT_MAX || G.money < PLOT_PRICE ? 'disabled' : ''}>${man(PLOT_PRICE)}</button></div>
-      <div class="item"><div class="info"><b>農作業スタッフ ${f.hands}人 / 必要 ${need}人</b><small>日給 ${yen(HAND_WAGE)}・${PLOTS_PER_HAND}区画ごとに1人。足りないと育ちが遅くなります</small></div>
+      <div class="item"><div class="info"><b>畑を1区画広げる</b><small class="num">${f.plots.length}/${plotCap()}区画${f.plots.length >= plotCap() ? '・ランクアップで上限が増えます' : ''}</small></div>
+        <button class="btn" data-act="f-buyPlot" ${f.plots.length >= plotCap() || G.money < PLOT_PRICE ? 'disabled' : ''}>${man(PLOT_PRICE)}</button></div>
+      <div class="item"><div class="info"><b>農作業スタッフ ${f.hands}人 / 必要 ${need}人</b><small>日給 ${yen(HAND_WAGE)}・${PLOTS_PER_HAND * (hasFac('tractor') ? 2 : 1)}区画ごとに1人。足りないと育ちが遅くなります</small></div>
         <div class="btns"><button class="btn sub" data-act="f-hand" data-v="-1" ${f.hands <= 1 ? 'disabled' : ''}>−</button><button class="btn" data-act="f-hand" data-v="1">＋</button></div></div>
     </div>`;
+}
+function farmLvCard() {
+  const f = F(), cur = FARM_LV[f.lv], nl = FARM_LV[f.lv + 1];
+  const unlock = nl ? CROPS.filter(c => CROP_LV[c.id] === f.lv + 1).map(c => c.icon + c.name).join('・') : '';
+  const facs = FACILITIES.map(fc => `<div class="item"><div class="info"><b>${fc.name}${hasFac(fc.id) ? ' ✅' : ''}</b><small>${fc.desc}${f.lv < fc.minLv ? `・「${FARM_LV[fc.minLv].name}」から` : ''}</small></div>
+      ${hasFac(fc.id) ? '<span class="pos">導入済み</span>' : `<button class="btn" data-act="f-fac" data-v="${fc.id}" ${f.lv < fc.minLv || G.money < fc.cost ? 'disabled' : ''}>${man(fc.cost)}</button>`}</div>`).join('');
+  return `<div class="card"><h3><span>農園ランク</span><span>Lv${f.lv + 1}「${cur.name}」</span></h3>
+      <p class="muted num">畑の上限 ${cur.plots}区画・収穫量 ×${cur.mult.toFixed(2)}</p>
+      ${nl ? `<div class="item"><div class="info"><b>「${nl.name}」へランクアップ</b><small class="num">上限 ${nl.plots}区画・収穫量 ×${nl.mult.toFixed(2)}${unlock ? `・${unlock} 解放` : ''}</small></div>
+        <button class="btn" data-act="f-lv" ${G.money < nl.cost ? 'disabled' : ''}>${man(nl.cost)}</button></div>` : '<p class="muted">最高ランクに到達！</p>'}
+    </div>
+    <div class="card"><h3>設備</h3>${facs}</div>`;
 }
 function farmSell() {
   const f = F();
   const rows = CROPS.map(c => {
     const n = stockOf(c.id);
     const oldest = f.stock.filter(s => s.crop === c.id).reduce((a, s) => Math.min(a, s.day), Infinity);
-    const left = n ? c.fresh - (G.day - oldest) : 0;
+    const left = n ? freshDays(c) - (G.day - oldest) : 0;
     return `<div class="item"><div class="info"><b>${c.icon} ${c.name} <span class="num">${n}${c.unit}</span></b>
       <small class="num">${n ? `いちばん古い在庫はあと${left}日で廃棄・` : ''}JA出荷 ${yen(c.price * WHOLESALE)}/${c.unit}</small></div>
       <button class="btn sub" data-act="f-whole" data-v="${c.id}" ${n ? '' : 'disabled'}>全部出荷</button></div>`;
@@ -871,7 +935,8 @@ const ACHIEVEMENTS = [
   { id: 'f1k',     name: 'フォロワー 1,000人',    reward: 200000,   test: () => G.farm.followers >= 1000 },
   { id: 'f10k',    name: 'フォロワー 1万人',      reward: 2000000,  test: () => G.farm.followers >= 10000 },
   { id: 'ec45',    name: 'EC評価 ★4.5',          reward: 500000,   test: () => G.farm.ec && G.farm.rating >= 4.5 },
-  { id: 'plots',   name: '畑 24区画',             reward: 1000000,  test: () => G.farm.plots.length >= 24 },
+  { id: 'plots',   name: '農園ランク「大農場」',   reward: 3000000,  test: () => G.farm.lv >= 4 },
+  { id: 'soil',    name: '土Lv5の区画をつくる',   reward: 300000,   test: () => G.farm.soil.some(v => v >= 5) },
   { id: 'toku',    name: '特日で出率105%超え',    reward: 300000,   test: () => G.history.some(h => h.ev === 2 && h.avgPay > 1.05) },
   { id: 'writer',  name: '来店取材で大当たり',    reward: 500000,   test: () => G.flags.writerWin },
   { id: 'rival',   name: 'ライバル店を撤退させる', reward: 3000000,  test: () => G.flags.rivalBeat },
@@ -884,6 +949,13 @@ function newExtras(g) {
   g.weather = g.weather || 'sun';
   g.flags = g.flags || {};
   g.achieved = g.achieved || [];
+  const f = g.farm;
+  if (f.lv === undefined) { f.lv = 0; while (f.lv < FARM_LV.length - 1 && FARM_LV[f.lv].plots < f.plots.length) f.lv++; }
+  f.fac = f.fac || {};
+  f.soil = f.soil || f.plots.map(() => 1);
+  while (f.soil.length < f.plots.length) f.soil.push(1);
+  f.mode = f.mode || 'plant';
+  for (const c of CROPS) if (f.priceLv[c.id] === undefined) f.priceLv[c.id] = 1;
   g.rival = g.rival || { name: RIVALS[0], power: 40, idx: 0, lose: 0, mod: 5 };
   return g;
 }
@@ -921,12 +993,16 @@ function autoStaff(d) {
   const f = G.farm;
   if (hired('farmer')) {
     f.plots.forEach((p, i) => { if (p && p.prog >= CROP[p.crop].grow) harvest(i, true); });
-    const pick = CROPS.filter(c => inSeason(c, d)).sort((a, b) => b.yield * b.price / b.grow - a.yield * a.price / a.grow)[0] || CROPS[0];
+    const pick = CROPS.filter(c => cropOpen(c) && (inSeason(c, d) || hasFac('house'))).sort((a, b) => b.yield * b.price / b.grow - a.yield * a.price / a.grow)[0] || CROPS[0];
     f.plots.forEach((p, i) => {
       if (!p && G.money > pick.seed + 300000) { G.money -= pick.seed; f.plots[i] = { crop: pick.id, prog: 0, ripe: 0, season: inSeason(pick, d) }; }
     });
     f.hands = Math.max(f.hands, handsNeed());
-    for (const s of f.stock) if (CROP[s.crop].fresh - (d - s.day) <= 0) { G.money += s.qty * CROP[s.crop].price * WHOLESALE; s.qty = 0; }
+    // without a net shop everything goes to JA; with one, only stock about to spoil
+    for (const s of f.stock) if (!f.ec || freshDays(CROP[s.crop]) - (d - s.day) <= 1) {
+      const rev = s.qty * CROP[s.crop].price * WHOLESALE;
+      G.money += rev; f.shipped = (f.shipped || 0) + rev; s.qty = 0;
+    }
     f.stock = f.stock.filter(s => s.qty > 0);
   }
   if (hired('eventer')) {
@@ -989,7 +1065,7 @@ function afterDay(d, h) {
     note('天候に恵まれて畑の育ちが早まった（＋2日）');
   }
   if (G.weather === 'typhoon') {
-    f.plots.forEach((p, i) => { if (p && Math.random() < 0.2) { f.plots[i] = null; note(`台風で${CROP[p.crop].name}の畑が1区画やられた…`); } });
+    f.plots.forEach((p, i) => { if (p && Math.random() < (hasFac('house') ? 0.1 : 0.2)) { f.plots[i] = null; note(`台風で${CROP[p.crop].name}の畑が1区画やられた…`); } });
   }
 
   // achievements
