@@ -40,7 +40,7 @@
   .row1 { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
   #shopName { font-family: var(--display); font-size: 18px; color: var(--gold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     text-shadow: 0 0 12px rgba(255,207,58,.45); min-width: 0; }
-  #rank { font-size: 11px; color: var(--muted); white-space: nowrap; }
+  #rank { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .row2 { display: flex; gap: 10px; align-items: center; flex-wrap: nowrap; white-space: nowrap; }
   .badges { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; min-height: 20px; margin-top: -4px; }
   .badges .calm { font-size: 11px; color: var(--muted); }
@@ -48,7 +48,7 @@
   .badge { font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 999px; letter-spacing: .04em; }
   .badge.big { background: var(--pink); color: #fff; box-shadow: 0 0 10px var(--pink); }
   .badge.small { background: var(--cyan); color: #04202a; }
-  #money { font-family: var(--display); font-size: 20px; margin-left: auto; }
+  #money { font-family: var(--display); font-size: 20px; margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   #money.neg { color: var(--bad); }
   .row3 { display: flex; gap: 8px; align-items: center; }
   .meter { flex: 1; display: grid; gap: 3px; min-width: 0; }
@@ -67,7 +67,7 @@
   .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .stat { background: var(--panel2); border-radius: 10px; padding: 8px; min-width: 0; }
   .stat small { display: block; color: var(--muted); font-size: 11px; }
-  .stat b { font-size: 15px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .stat b { font-size: 15px; font-variant-numeric: tabular-nums; white-space: nowrap; display: block; overflow: hidden; text-overflow: ellipsis; }
   .pos { color: var(--good); } .negc { color: var(--bad); }
   .muted { color: var(--muted); font-size: 12px; line-height: 1.6; margin: 0; }
 
@@ -225,6 +225,7 @@ const RULES = [
   { id: 'sat',  name: '毎週土曜',               fn: d => d.getDay() === 6 ? 1 : 0 },
   { id: 'pay',  name: '給料日（25日）',          fn: d => d.getDate() === 25 ? 1 : 0 },
 ];
+const FLOOR_SHOW = 600, UNIT_SHOW = 200;
 const STAFF_WAGE = 10000, UPKEEP = 800, SELL_BACK = 0.2;
 const RANKS = [[0, '新人オーナー'], [40, '地元の顔'], [100, '人気ホール経営者'], [200, '業界の注目株'], [350, 'ホール王'], [480, '伝説のオーナー']];
 
@@ -253,12 +254,26 @@ const dateOf = d => new Date(START.getFullYear(), START.getMonth(), START.getDat
 const dayIndex = date => Math.round((date - START) / 86400000);
 const fmtDate = d => { const x = dateOf(d); return `${x.getMonth() + 1}月${x.getDate()}日(${DOW[x.getDay()]})`; };
 const yen = v => (v < 0 ? '−' : '') + '¥' + Math.abs(Math.round(v)).toLocaleString('ja-JP');
-const man = v => { const a = Math.abs(v); const s = v < 0 ? '−' : ''; return a >= 1e8 ? `${s}${(a / 1e8).toFixed(2)}億円` : `${s}${Math.round(a / 1e4).toLocaleString('ja-JP')}万円`; };
+const man = v => { const a = Math.abs(v); const s = v < 0 ? '−' : ''; return a >= 1e12 ? `${s}${(a / 1e12).toFixed(2)}兆円` : a >= 1e8 ? `${s}${(a / 1e8).toFixed(2)}億円` : `${s}${Math.round(a / 1e4).toLocaleString('ja-JP')}万円`; };
+
+// beyond the named tiers, levels keep going forever: each step is bigger and costs more
+function hallLv(i) {
+  if (i < LEVELS.length) return LEVELS[i];
+  const last = LEVELS[LEVELS.length - 1], k = i - LEVELS.length + 1;
+  return { name: `全国チェーン ${k + 1}号店規模`, seats: Math.round(last.seats * 1.5 ** k / 10) * 10,
+    cost: Math.round(last.cost * 2.2 ** k / 1e6) * 1e6, rent: Math.round(last.rent * 1.5 ** k / 1e4) * 1e4 };
+}
+function farmLv(i) {
+  if (i < FARM_LV.length) return FARM_LV[i];
+  const last = FARM_LV[FARM_LV.length - 1], k = i - FARM_LV.length + 1;
+  return { name: `大農場 第${k + 1}農区`, plots: last.plots + 12 * k, mult: +(last.mult + 0.1 * k).toFixed(2),
+    cost: Math.round(last.cost * 2 ** k / 1e6) * 1e6 };
+}
 const pct = v => (v * 100).toFixed(1) + '%';
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const rnd = n => Math.floor(Math.random() * n);
 const gauss = () => { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
-const seats = () => LEVELS[G.level].seats;
+const seats = () => hallLv(G.level).seats;
 const staffNeed = () => Math.max(1, Math.ceil(G.machines.length / 15));
 function eventOf(d) {
   if (G.manual[d] !== undefined) return G.manual[d];
@@ -327,7 +342,7 @@ function advanceDay() {
     if (!best || inn * (pay - 1) > best.v) best = { v: inn * (pay - 1), m };
   });
   const gross = sales - out;
-  const costs = LEVELS[G.level].rent + G.staff * STAFF_WAGE + M * UPKEEP + ADS[G.ad].cost;
+  const costs = hallLv(G.level).rent + G.staff * STAFF_WAGE + M * UPKEEP + ADS[G.ad].cost;
   const net = gross - costs;
   G.money += net;
 
@@ -384,12 +399,12 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;',
 function render() { renderStatus(); renderTabs(); renderMain(); }
 function renderStatus() {
   $('shopName').textContent = G.name;
-  $('rank').textContent = `${LEVELS[G.level].name}・${rankName()}`;
+  $('rank').textContent = `${hallLv(G.level).name}・${rankName()}`;
   $('date').textContent = fmtDate(G.day);
   const ev = eventOf(G.day);
   $('wx').textContent = wx().icon + wx().name;
   $('evBadge').innerHTML = ((G.writerDay === G.day ? '<span class="badge big">取材</span> ' : '') + (rivalEventOf(G.day) ? '<span class="badge rival">ライバルイベ</span> ' : '') + (ev === 2 ? '<span class="badge big">特日</span>' : ev === 1 ? '<span class="badge small">イベ日</span>' : '')) || '<span class="calm">通常営業</span>';
-  $('money').textContent = yen(G.money);
+  $('money').textContent = Math.abs(G.money) >= 1e8 ? man(G.money) : yen(G.money);
   $('money').className = 'num' + (G.money < 0 ? ' neg' : '');
   $('repV').textContent = Math.round(G.rep); $('repBar').style.width = G.rep + '%';
   $('trustV').textContent = Math.round(G.trust); $('trustBar').style.width = G.trust + '%';
@@ -422,7 +437,8 @@ function viewHall() {
         <div class="stat"><small>収支</small><b class="${h.net >= 0 ? 'pos' : 'negc'}">${man(h.net)}</b></div>
       </div>
     </div>` : `<div class="card"><h3>はじめに</h3><p class="muted">「翌日へ」で1日営業します。設定を上げるとお客さんが勝ちやすくなって評判が上がり、下げると店の粗利が増えます。イベ日には「イベ日設定」が自動で入ります。</p></div>`;
-  const floor = G.machines.map(m => {
+  const shown = Math.min(G.machines.length, FLOOR_SHOW);
+  const floor = G.machines.slice(0, FLOOR_SHOW).map(m => {
     const k = MODEL[m.model].kind;
     return `<div class="m ${k}${m.pay > 1.06 && m.util > 0.2 ? ' hot' : ''}" style="opacity:${(0.25 + 0.75 * m.util).toFixed(2)}" title="${m.id}番 ${esc(MODEL[m.model].name)}"></div>`;
   }).join('');
@@ -430,7 +446,8 @@ function viewHall() {
   return report + `
     <div class="card">
       <h3><span>フロア ${G.machines.length}/${seats()}台</span><span>${empty > 0 ? `空き ${empty}台` : '満台'}</span></h3>
-      <div id="floor">${floor}${'<div class="m" style="border:1px dashed var(--line)"></div>'.repeat(Math.max(0, empty))}</div>
+      <div id="floor">${floor}${'<div class="m" style="border:1px dashed var(--line)"></div>'.repeat(Math.max(0, Math.min(empty, FLOOR_SHOW - shown)))}</div>
+      ${G.machines.length > FLOOR_SHOW ? `<p class="muted">ほか ${(G.machines.length - FLOOR_SHOW).toLocaleString('ja-JP')}台（表示は${FLOOR_SHOW}台まで）</p>` : ''}
       <div class="legend"><span style="--c:var(--cyan)">スロット</span><span style="--c:var(--pink)">パチンコ</span><span style="--c:var(--gold)">光る＝よく出た台</span><span>濃さ＝稼働率</span></div>
     </div>
     <div class="card"><h3><span>収支の推移（直近30日）</span></h3>${chart()}</div>
@@ -472,7 +489,7 @@ function viewSet() {
       <div class="mhead"><div class="mname">${esc(mod.name)}<span class="tag ${mod.kind}">${mod.cat}</span></div><div class="muted num">${ms.length}台・稼働 ${Math.round(util * 100)}%・データ出率 ${pct(seen)}</div></div>
       <div class="chips"><span>通常日</span>${chips('s', '')}</div>
       <div class="chips"><span>イベ日</span>${chips('e', 'ev')}</div>
-      <details><summary>1台ずつ設定する</summary><div class="units">${ms.map(m => `
+      <details><summary>1台ずつ設定する${ms.length > UNIT_SHOW ? `（先頭${UNIT_SHOW}台）` : ''}</summary><div class="units">${ms.slice(0, UNIT_SHOW).map(m => `
         <div class="unit"><b class="num">${m.id}番</b>
           <select aria-label="${m.id}番 通常" data-act="one" data-id="${m.id}" data-key="s">${opts(m.s)}</select>
           <select aria-label="${m.id}番 イベ日" data-act="one" data-id="${m.id}" data-key="e" style="color:var(--pink)">${opts(m.e)}</select>
@@ -532,14 +549,14 @@ function viewBiz() {
   return viewStaff() + viewRival() + viewBizBase() + viewAchievements();
 }
 function viewBizBase() {
-  const nl = LEVELS[G.level + 1];
+  const nl = hallLv(G.level + 1);
   const need = staffNeed();
   const h = G.history.slice(-7);
   const wk = h.reduce((a, x) => a + x.net, 0);
   return `
     <div class="card"><h3>店名</h3><input class="name" id="nameIn" maxlength="16" value="${esc(G.name)}" aria-label="店名"></div>
-    <div class="card"><h3><span>店舗</span><span>${LEVELS[G.level].name}</span></h3>
-      <p class="muted num">台数上限 ${seats()}台・家賃 ${yen(LEVELS[G.level].rent)}/日</p>
+    <div class="card"><h3><span>店舗</span><span>${hallLv(G.level).name}</span></h3>
+      <p class="muted num">台数上限 ${seats()}台・家賃 ${yen(hallLv(G.level).rent)}/日</p>
       ${nl ? `<div class="item"><div class="info"><b>${nl.name}へ移転・拡張</b><small class="num">上限 ${nl.seats}台・家賃 ${yen(nl.rent)}/日</small></div>
         <button class="btn" data-act="expand" ${G.money < nl.cost ? 'disabled' : ''}>${man(nl.cost)}</button></div>` : '<p class="muted">最大規模に到達！</p>'}
     </div>
@@ -620,7 +637,7 @@ const stockOf = id => F().stock.filter(s => s.crop === id).reduce((a, s) => a + 
 const hasFac = id => !!(F().fac && F().fac[id]);
 const handsNeed = () => Math.max(1, Math.ceil(F().plots.length / (PLOTS_PER_HAND * (hasFac('tractor') ? 2 : 1))));
 const freshDays = c => c.fresh * (hasFac('cold') ? 2 : 1);
-const plotCap = () => FARM_LV[F().lv].plots;
+const plotCap = () => farmLv(F().lv).plots;
 const cropOpen = c => F().lv >= CROP_LV[c.id];
 const ecPrice = id => Math.round(CROP[id].price * PRICE_LV[F().priceLv[id]].mult);
 
@@ -718,10 +735,10 @@ function farmDay(d) {
 function farmAction(a, b) {
   const f = F();
   if (a === 'f-view') { f.view = b.dataset.v; return; }
-  if (a === 'f-seed') { if (cropOpen(CROP[b.dataset.v])) f.seed = b.dataset.v; else toast(`${FARM_LV[CROP_LV[b.dataset.v]].name}で解放されます`); return; }
+  if (a === 'f-seed') { if (cropOpen(CROP[b.dataset.v])) f.seed = b.dataset.v; else toast(`${farmLv(CROP_LV[b.dataset.v]).name}で解放されます`); return; }
   if (a === 'f-mode') { f.mode = b.dataset.v; return; }
   if (a === 'f-lv') {
-    const nl = FARM_LV[f.lv + 1];
+    const nl = farmLv(f.lv + 1);
     if (!nl || G.money < nl.cost) return;
     G.money -= nl.cost; f.lv++;
     const opened = CROPS.filter(c => CROP_LV[c.id] === f.lv).map(c => c.name);
@@ -778,7 +795,7 @@ function harvest(i, quiet) {
   const f = F(), p = f.plots[i], c = CROP[p.crop];
   const over = Math.max(0, (p.ripe || 0) - 3); // left too long after ripening
   const soil = 1 + ((f.soil[i] || 1) - 1) * 0.1;
-  const qty = Math.round(c.yield * (p.season ? 1.25 : hasFac('house') ? 1 : 0.8) * FARM_LV[f.lv].mult * soil * Math.max(0.3, 1 - over * 0.15) * (0.9 + Math.random() * 0.2));
+  const qty = Math.round(c.yield * (p.season ? 1.25 : hasFac('house') ? 1 : 0.8) * farmLv(f.lv).mult * soil * Math.max(0.3, 1 - over * 0.15) * (0.9 + Math.random() * 0.2));
   f.stock.push({ crop: c.id, qty, day: G.day });
   f.plots[i] = null;
   if (!quiet) toast(`${c.icon} ${c.name} ${qty}${c.unit} 収穫！`);
@@ -853,9 +870,9 @@ function farmField() {
     </div>`;
 }
 function farmLvCard() {
-  const f = F(), cur = FARM_LV[f.lv], nl = FARM_LV[f.lv + 1];
+  const f = F(), cur = farmLv(f.lv), nl = farmLv(f.lv + 1);
   const unlock = nl ? CROPS.filter(c => CROP_LV[c.id] === f.lv + 1).map(c => c.icon + c.name).join('・') : '';
-  const facs = FACILITIES.map(fc => `<div class="item"><div class="info"><b>${fc.name}${hasFac(fc.id) ? ' ✅' : ''}</b><small>${fc.desc}${f.lv < fc.minLv ? `・「${FARM_LV[fc.minLv].name}」から` : ''}</small></div>
+  const facs = FACILITIES.map(fc => `<div class="item"><div class="info"><b>${fc.name}${hasFac(fc.id) ? ' ✅' : ''}</b><small>${fc.desc}${f.lv < fc.minLv ? `・「${farmLv(fc.minLv).name}」から` : ''}</small></div>
       ${hasFac(fc.id) ? '<span class="pos">導入済み</span>' : `<button class="btn" data-act="f-fac" data-v="${fc.id}" ${f.lv < fc.minLv || G.money < fc.cost ? 'disabled' : ''}>${man(fc.cost)}</button>`}</div>`).join('');
   return `<div class="card"><h3><span>農園ランク</span><span>Lv${f.lv + 1}「${cur.name}」</span></h3>
       <p class="muted num">畑の上限 ${cur.plots}区画・収穫量 ×${cur.mult.toFixed(2)}</p>
@@ -953,7 +970,7 @@ function newExtras(g) {
   g.flags = g.flags || {};
   g.achieved = g.achieved || [];
   const f = g.farm;
-  if (f.lv === undefined) { f.lv = 0; while (f.lv < FARM_LV.length - 1 && FARM_LV[f.lv].plots < f.plots.length) f.lv++; }
+  if (f.lv === undefined) { f.lv = 0; while (farmLv(f.lv).plots < f.plots.length) f.lv++; }
   f.fac = f.fac || {};
   f.soil = f.soil || f.plots.map(() => 1);
   while (f.soil.length < f.plots.length) f.soil.push(1);
@@ -1133,7 +1150,7 @@ $('main').addEventListener('click', e => {
     G.machines.splice(i, 1);
     G.money += MODEL[b.dataset.model].price * SELL_BACK;
   } else if (a === 'expand') {
-    const nl = LEVELS[G.level + 1];
+    const nl = hallLv(G.level + 1);
     if (!nl || G.money < nl.cost) return;
     G.money -= nl.cost; G.level++;
     note(`${nl.name}にリニューアル！ 最大${nl.seats}台まで置けるように`);
