@@ -112,6 +112,9 @@
   .cal button.ev1 { background: rgba(63,224,255,.22); border-color: var(--cyan); }
   .cal button.ev2 { background: rgba(255,79,163,.3); border-color: var(--pink); }
   .cal button.empty { visibility: hidden; }
+  .cal button.rv::after { content: ""; position: absolute; top: 3px; right: 3px; width: 5px; height: 5px; border-radius: 50%; background: var(--bad); }
+  .badge.rival { background: var(--bad); color: #fff; }
+  #wx { font-size: 12px; color: var(--muted); }
   select.full { width: 100%; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
 
   /* shop & management */
@@ -157,7 +160,7 @@
 <body>
 <header id="status">
   <div class="row1"><div id="shopName"></div><div id="rank"></div></div>
-  <div class="row2"><span id="date"></span><span id="evBadge"></span><span id="money" class="num"></span></div>
+  <div class="row2"><span id="date"></span><span id="wx"></span><span id="evBadge"></span><span id="money" class="num"></span></div>
   <div class="row3">
     <div class="meter"><label><span>評判</span><span id="repV" class="num"></span></label><div class="bar"><i id="repBar" style="background:var(--gold)"></i></div></div>
     <div class="meter"><label><span>イベ信頼度</span><span id="trustV" class="num"></span></label><div class="bar"><i id="trustBar" style="background:var(--pink)"></i></div></div>
@@ -248,6 +251,7 @@ const yen = v => (v < 0 ? '−' : '') + '¥' + Math.abs(Math.round(v)).toLocaleS
 const man = v => { const a = Math.abs(v); const s = v < 0 ? '−' : ''; return a >= 1e8 ? `${s}${(a / 1e8).toFixed(2)}億円` : `${s}${Math.round(a / 1e4).toLocaleString('ja-JP')}万円`; };
 const pct = v => (v * 100).toFixed(1) + '%';
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const rnd = n => Math.floor(Math.random() * n);
 const gauss = () => { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
 const seats = () => LEVELS[G.level].seats;
 const staffNeed = () => Math.max(1, Math.ceil(G.machines.length / 15));
@@ -265,22 +269,32 @@ function rankName() { let r = RANKS[0][1]; for (const [n, t] of RANKS) if (G.mac
 // ---------- Simulation ----------
 function advanceDay() {
   if (G.over) return;
+  autoStaff(G.day);
   const d = G.day, date = dateOf(d), ev = eventOf(d);
   const M = G.machines.length;
   let dayMod = [1.2, 0.9, 0.9, 0.95, 0.95, 1.08, 1.3][date.getDay()];
   if (date.getDate() === 25) dayMod *= 1.2;
-  const rain = Math.random() < 0.2;
-  if (rain) dayMod *= 1.06;
+  const rain = G.weather === 'rain';
+  dayMod *= wx().hall;
+  if (G.writerDay === d) dayMod *= 1.5;
   const evMod = ev ? (1 + (ev === 2 ? 1.0 : 0.5) * G.trust / 100) * (1 + G.farm.hallBoost) : 1;
   if (ev) G.farm.hallBoost = 0;
+  // the rival steals customers on its event days; on a shared event day the stronger hall wins
+  const rev = rivalEventOf(d);
+  let rivalMod = 1;
+  if (rev) {
+    const theirs = G.rival.power * (rev === 2 ? 1.3 : 1);
+    const mine = ev ? (G.rep + G.trust) / 2 * (ev === 2 ? 1.3 : 1) : 0;
+    rivalMod = ev ? clamp(0.85 + (mine - theirs) / 100, 0.6, 1.25) : clamp(1 - theirs / 250 - (rev === 2 ? 0.1 : 0), 0.5, 0.95);
+  }
   const popAvg = M ? G.machines.reduce((a, m) => a + popNow(MODEL[m.model], d), 0) / M : 1;
-  const visitors = Math.round(M * 2.2 * (0.05 + G.rep / 100 * 1.6) * Math.sqrt(popAvg) * dayMod * evMod * ADS[G.ad].mod * (0.92 + Math.random() * 0.16));
+  const visitors = Math.round(M * 2.2 * (0.05 + G.rep / 100 * 1.6) * Math.sqrt(popAvg) * dayMod * evMod * ADS[G.ad].mod * rivalMod * (0.92 + Math.random() * 0.16));
   // players stay longer at a hall where machines have been paying out
   const seenAvg = M ? G.machines.reduce((a, m) => a + m.seen, 0) / M : 1;
   let demand = Math.min(M, visitors * 0.55 * clamp(1 + (seenAvg - 1) * 5, 0.5, 1.4));
 
   // customers pick machines by popularity and how loose the machine has looked lately
-  const w = G.machines.map(m => popNow(MODEL[m.model], d) * Math.exp(7 * (m.seen - 1)));
+  const w = G.machines.map(m => m.broken ? 0 : popNow(MODEL[m.model], d) * Math.exp(7 * (m.seen - 1)));
   const util = G.machines.map(() => 0);
   let left = demand;
   for (let pass = 0; pass < 4 && left > 0.01; pass++) {
@@ -328,8 +342,9 @@ function advanceDay() {
 
   const farmNet = farmDay(d);
   G.money += farmNet;
-  G.history.push({ d, visitors, sales, gross, net, avgPay, ev, rain, best: best && best.m.id, farmNet });
+  G.history.push({ d, visitors, sales, gross, net, avgPay, ev, rain, best: best && best.m.id, farmNet, wx: G.weather, rev });
   if (G.history.length > 60) G.history.shift();
+  afterDay(d, G.history[G.history.length - 1]);
   G.day++;
 
   for (const m of MODELS) if (m.release > 0 && m.release <= G.day && !G.seenModels.includes(m.id)) {
@@ -367,7 +382,8 @@ function renderStatus() {
   $('rank').textContent = `${LEVELS[G.level].name}・${rankName()}`;
   $('date').textContent = fmtDate(G.day);
   const ev = eventOf(G.day);
-  $('evBadge').innerHTML = ev === 2 ? '<span class="badge big">特日</span>' : ev === 1 ? '<span class="badge small">イベ日</span>' : '';
+  $('wx').textContent = wx().icon + wx().name;
+  $('evBadge').innerHTML = (G.writerDay === G.day ? '<span class="badge big">取材</span> ' : '') + (rivalEventOf(G.day) ? '<span class="badge rival">ライバルイベ</span> ' : '') + (ev === 2 ? '<span class="badge big">特日</span>' : ev === 1 ? '<span class="badge small">イベ日</span>' : '');
   $('money').textContent = yen(G.money);
   $('money').className = 'num' + (G.money < 0 ? ' neg' : '');
   $('repV').textContent = Math.round(G.rep); $('repBar').style.width = G.rep + '%';
@@ -391,7 +407,7 @@ function viewHall() {
   const h = G.history[G.history.length - 1];
   const report = h ? `
     <div class="card">
-      <h3><span>前日の結果 ${fmtDate(h.d)}${h.ev === 2 ? '・特日' : h.ev ? '・イベ日' : ''}${h.rain ? '・雨' : ''}</span></h3>
+      <h3><span>前日の結果 ${fmtDate(h.d)}${h.ev === 2 ? '・特日' : h.ev ? '・イベ日' : ''}・${WEATHER[h.wx || 'sun'].icon}${h.rev ? '・ライバルイベ' : ''}</span></h3>
       <div class="stats">
         <div class="stat"><small>来店客</small><b>${h.visitors}人</b></div>
         <div class="stat"><small>売上</small><b>${man(h.sales)}</b></div>
@@ -472,7 +488,7 @@ function viewEv() {
   for (let dd = 1; dd <= days; dd++) {
     const di = dayIndex(new Date(y, mo, dd));
     const ev = di >= 0 ? eventOf(di) : 0;
-    const cls = [di < G.day ? 'past' : '', di === G.day ? 'today' : '', ev ? 'ev' + ev : ''].join(' ');
+    const cls = [di < G.day ? 'past' : '', di === G.day ? 'today' : '', ev ? 'ev' + ev : '', di >= 0 && rivalEventOf(di) ? 'rv' : ''].join(' ');
     cells += `<button class="${cls}" data-act="day" data-d="${di}" ${di < G.day ? 'disabled' : ''}><span>${dd}</span>${ev ? `<small style="color:${ev === 2 ? 'var(--pink)' : 'var(--cyan)'}">${ev === 2 ? '特日' : 'イベ'}</small>` : ''}</button>`;
   }
   const upcoming = [];
@@ -481,7 +497,7 @@ function viewEv() {
     <div class="card">
       <div class="calhead"><button class="cbtn" data-act="cal" data-v="-1" aria-label="前の月">◀</button><b>${y}年${mo + 1}月</b><button class="cbtn" data-act="cal" data-v="1" aria-label="次の月">▶</button></div>
       <div class="cal">${cells}</div>
-      <p class="muted">日付をタップ：なし → イベ日 → 特日 → なし。特日はイベ日の約2倍お客さんが期待して来ます。</p>
+      <p class="muted">日付をタップ：なし → イベ日 → 特日 → なし。特日はイベ日の約2倍お客さんが期待して来ます。赤い点はライバル店のイベント日です。</p>
     </div>
     <div class="card"><h3>定期イベント</h3>
       <select class="full" id="ruleSel" data-act="rule">${RULES.map(r => `<option value="${r.id}" ${G.rule === r.id ? 'selected' : ''}>${r.name}</option>`).join('')}</select>
@@ -508,6 +524,9 @@ function viewShop() {
 }
 
 function viewBiz() {
+  return viewStaff() + viewRival() + viewBizBase() + viewAchievements();
+}
+function viewBizBase() {
   const nl = LEVELS[G.level + 1];
   const need = staffNeed();
   const h = G.history.slice(-7);
@@ -605,7 +624,7 @@ function farmNote(t) { F().log.unshift({ d: G.day, t }); if (F().log.length > 30
 function farmDay(d) {
   const f = F();
   let income = 0, cost = f.hands * HAND_WAGE;
-  const speed = f.hands >= handsNeed() ? 1 : 0.6;
+  const speed = (f.hands >= handsNeed() ? 1 : 0.6) * wx().grow;
   for (const p of f.plots) if (p && p.prog < CROP[p.crop].grow) p.prog = Math.min(CROP[p.crop].grow, p.prog + speed);
   for (const p of f.plots) if (p && p.prog >= CROP[p.crop].grow) p.ripe = (p.ripe || 0) + 1;
 
@@ -655,7 +674,7 @@ function farmDay(d) {
       toast(`収穫祭に ${people}人 来場！`);
     }
     f.followers += gain;
-    income += rev;
+    income += rev * (hired('eventer') ? 1.2 : 1);
     note(`農園：${def.name} 開催（フォロワー +${gain}）`);
   }
   if (f.events.some(e => e.day === d)) f.eventBoost = 0;
@@ -715,7 +734,7 @@ function harvest(i, quiet) {
   f.plots[i] = null;
   if (!quiet) toast(`${c.icon} ${c.name} ${qty}${c.unit} 収穫！`);
 }
-function post(type) {
+function post(type, auto) {
   const f = F();
   if (f.posted === G.day) return toast('今日はもう投稿しました');
   let gain = 3 + Math.sqrt(f.followers) * 0.25, msg = '';
@@ -732,11 +751,12 @@ function post(type) {
   if (type === 'hall') {
     gain *= 0.5 + Math.random(); f.hallBoost = Math.min(0.6, f.hallBoost + 0.1 + f.followers / 20000); msg = '次のイベ日の来店が増えそう';
   }
+  if (hired('sns')) gain *= 1.3;
   const viral = Math.random() < 0.06;
   if (viral) gain *= 6;
   gain = Math.round(gain);
   f.followers += gain; f.posted = G.day; f.lastPost = G.day;
-  toast(`${viral ? 'バズった！ ' : ''}フォロワー +${gain}${msg ? '・' + msg : ''}`);
+  if (!auto || viral) toast(`${viral ? 'バズった！ ' : ''}フォロワー +${gain}${msg ? '・' + msg : ''}`);
   farmNote(`SNS「${POSTS.find(p => p.id === type).name}」投稿 フォロワー +${gain}${viral ? '（バズ）' : ''}`);
 }
 
@@ -824,6 +844,189 @@ function farmSns() {
       <p class="muted">開催前に「イベント告知」を投稿すると参加者が増えます。</p></div>`;
 }
 
+// ---------- Specialists (automation) ----------
+const HIRES = [
+  { id: 'setter',  name: '設定士',         wage: 20000, desc: '毎日の台の設定を自動で組む。人気台に高設定を入れて「見せ台」を作るのが上手' },
+  { id: 'manager', name: '店長',           wage: 18000, desc: 'ホールのスタッフ数を自動で調整し、故障した台をすぐ修理する' },
+  { id: 'sns',     name: 'SNS運用担当',    wage: 15000, desc: '毎日いちばん効く内容を自動で投稿。フォロワーの伸びも1.3倍' },
+  { id: 'eventer', name: 'イベントスタッフ', wage: 12000, desc: '農園イベントを自動で企画・開催。イベントの売上が1.2倍' },
+  { id: 'farmer',  name: '農場長',         wage: 15000, desc: '旬の作物を自動で植えて収穫し、傷みそうな在庫を出荷する' },
+];
+const SETTER_MODES = [
+  { id: 'take',    name: '回収重視', normal: [1, 0.08, 4], event: [4, 0.20, 5] },
+  { id: 'balance', name: 'バランス', normal: [2, 0.12, 4], event: [4, 0.35, 6] },
+  { id: 'give',    name: '還元重視', normal: [2, 0.20, 5], event: [4, 0.60, 6] },
+];
+const WEATHER = {
+  sun:     { icon: '☀️', name: '晴れ',  hall: 1.00, grow: 1.0 },
+  rain:    { icon: '☔', name: '雨',    hall: 1.08, grow: 1.0 },
+  heat:    { icon: '🔥', name: '猛暑',  hall: 1.12, grow: 0.5 },
+  typhoon: { icon: '🌀', name: '台風',  hall: 0.55, grow: 0 },
+};
+const ACHIEVEMENTS = [
+  { id: 'black',   name: 'はじめての黒字',        reward: 100000,   test: () => G.history.some(h => h.net + (h.farmNet || 0) > 0) },
+  { id: 'm50',     name: '設置台数 50台',         reward: 500000,   test: () => G.machines.length >= 50 },
+  { id: 'm100',    name: '設置台数 100台',        reward: 1000000,  test: () => G.machines.length >= 100 },
+  { id: 'm300',    name: '設置台数 300台',        reward: 5000000,  test: () => G.machines.length >= 300 },
+  { id: 'f1k',     name: 'フォロワー 1,000人',    reward: 200000,   test: () => G.farm.followers >= 1000 },
+  { id: 'f10k',    name: 'フォロワー 1万人',      reward: 2000000,  test: () => G.farm.followers >= 10000 },
+  { id: 'ec45',    name: 'EC評価 ★4.5',          reward: 500000,   test: () => G.farm.ec && G.farm.rating >= 4.5 },
+  { id: 'plots',   name: '畑 24区画',             reward: 1000000,  test: () => G.farm.plots.length >= 24 },
+  { id: 'toku',    name: '特日で出率105%超え',    reward: 300000,   test: () => G.history.some(h => h.ev === 2 && h.avgPay > 1.05) },
+  { id: 'writer',  name: '来店取材で大当たり',    reward: 500000,   test: () => G.flags.writerWin },
+  { id: 'rival',   name: 'ライバル店を撤退させる', reward: 3000000,  test: () => G.flags.rivalBeat },
+  { id: 'oku',     name: '資金 1億円',            reward: 0,        test: () => G.money >= 1e8 },
+];
+const RIVALS = ['パーラー銀河', 'ホール・ダイナマイト', 'メガパーク王国', 'スーパーアリーナ'];
+
+function newExtras(g) {
+  g.hire = g.hire || { setter: false, manager: false, sns: false, eventer: false, farmer: false, mode: 'balance' };
+  g.weather = g.weather || 'sun';
+  g.flags = g.flags || {};
+  g.achieved = g.achieved || [];
+  g.rival = g.rival || { name: RIVALS[0], power: 40, idx: 0, lose: 0, mod: 5 };
+  return g;
+}
+const hired = id => G.hire[id];
+const hireCost = () => HIRES.reduce((a, h) => a + (G.hire[h.id] ? h.wage : 0), 0);
+const wx = () => WEATHER[G.weather];
+// the rival runs events on days ending in its own digit, and a big one on the 15th
+function rivalEventOf(d) {
+  if (!G.rival || G.rival.gone) return 0;
+  const dt = dateOf(d).getDate();
+  return dt === 15 ? 2 : dt % 10 === G.rival.mod ? 1 : 0;
+}
+function rollWeather(d) {
+  const m = monthOf(d), r = Math.random();
+  if ((m >= 8 && m <= 10) && r < 0.06) return 'typhoon';
+  if ((m >= 7 && m <= 8) && r < 0.3) return 'heat';
+  return r < 0.22 ? 'rain' : 'sun';
+}
+
+// runs at the start of a day: specialists do their jobs
+function autoStaff(d) {
+  const ev = eventOf(d);
+  if (hired('setter')) {
+    const mode = SETTER_MODES.find(x => x.id === G.hire.mode);
+    const [base, ratio, hi] = ev ? mode.event : mode.normal;
+    // hot machines go to the most popular models, rotating daily so regulars keep guessing
+    const ranked = G.machines.slice().sort((a, b) => popNow(MODEL[b.model], d) - popNow(MODEL[a.model], d) || ((a.id * 7 + d) % 11) - ((b.id * 7 + d) % 11));
+    const hot = new Set(ranked.slice(0, Math.round(G.machines.length * ratio)).map(m => m.id));
+    for (const m of G.machines) m[ev ? 'e' : 's'] = hot.has(m.id) ? hi : base;
+  }
+  if (hired('manager')) {
+    G.staff = staffNeed();
+    for (const m of G.machines) if (m.broken) { m.broken = 0; G.money -= 10000; }
+  }
+  const f = G.farm;
+  if (hired('farmer')) {
+    f.plots.forEach((p, i) => { if (p && p.prog >= CROP[p.crop].grow) harvest(i, true); });
+    const pick = CROPS.filter(c => inSeason(c, d)).sort((a, b) => b.yield * b.price / b.grow - a.yield * a.price / a.grow)[0] || CROPS[0];
+    f.plots.forEach((p, i) => {
+      if (!p && G.money > pick.seed + 300000) { G.money -= pick.seed; f.plots[i] = { crop: pick.id, prog: 0, ripe: 0, season: inSeason(pick, d) }; }
+    });
+    f.hands = Math.max(f.hands, handsNeed());
+    for (const s of f.stock) if (CROP[s.crop].fresh - (d - s.day) <= 0) { G.money += s.qty * CROP[s.crop].price * WHOLESALE; s.qty = 0; }
+    f.stock = f.stock.filter(s => s.qty > 0);
+  }
+  if (hired('eventer')) {
+    const units = f.stock.reduce((a, s) => a + s.qty, 0);
+    const has = t => f.events.some(e => e.type === t);
+    const book = t => { const def = FARM_EVENTS.find(x => x.id === t); if (G.money > def.cost + 500000) { G.money -= def.cost; f.events.push({ type: t, day: d + def.lead }); } };
+    if (units > 120 && !has('marche')) book('marche');
+    if (f.followers > 800 && !has('taiken') && d % 14 === 0) book('taiken');
+    if (f.followers > 2000 && !has('matsuri') && d % 30 === 0) book('matsuri');
+  }
+  if (hired('sns') && f.posted !== d) {
+    const soonEv = [1, 2, 3].some(k => eventOf(d + k));
+    const type = soonEv && f.hallBoost < 0.3 ? 'hall' : f.events.length && f.eventBoost < 0.6 ? 'event' : f.stock.length && f.ec ? 'harvest' : 'recipe';
+    post(type, true);
+  }
+}
+
+// runs after a day: happenings, rival, achievements, next weather
+function afterDay(d, h) {
+  G.money -= hireCost();
+  h.hireCost = hireCost();
+  const f = G.farm;
+
+  // famous writer visit judged on the day
+  if (G.writerDay === d) {
+    if (h.avgPay >= 1.03) { G.trust = clamp(G.trust + 12, 0, 100); G.rep = clamp(G.rep + 6, 0, 100); G.flags.writerWin = true; note(`来店取材が大成功！ 出率 ${pct(h.avgPay)} で一気に話題に`); toast('来店取材、大成功！'); }
+    else { G.trust = clamp(G.trust - 12, 0, 100); note(`来店取材なのに出率 ${pct(h.avgPay)}… がっかりされました`); }
+    G.writerDay = null;
+  }
+  // rival
+  const r = G.rival;
+  if (!r.gone) {
+    r.power = clamp(r.power + (Math.random() - 0.45) * 0.6, 20, 95);
+    r.lose = G.rep > r.power + 10 ? r.lose + 1 : Math.max(0, r.lose - 1);
+    if (r.lose >= 30) {
+      r.gone = true; r.back = d + 45; G.flags.rivalBeat = true;
+      note(`ライバル「${r.name}」が撤退！ 地域のお客さんを独り占め`); toast(`ライバル「${r.name}」撤退！`);
+    }
+  } else if (d >= r.back) {
+    r.idx++; Object.assign(r, { gone: false, name: RIVALS[r.idx % RIVALS.length], power: 50 + r.idx * 10, lose: 0, mod: [5, 3, 8, 1][r.idx % 4] });
+    note(`新しいライバル「${r.name}」がオープン（強さ ${Math.round(r.power)}）`);
+  }
+
+  // random happenings
+  const roll = Math.random();
+  if (roll < 0.04 && G.machines.length) {
+    const m = G.machines[rnd(G.machines.length)];
+    m.broken = 1;
+    note(`${m.id}番台（${MODEL[m.model].name}）が故障${hired('manager') ? '。店長が明日朝に修理します' : '。経営タブから修理してください'}`);
+  } else if (roll < 0.07 && !G.writerDay) {
+    G.writerDay = d + 3;
+    note(`${fmtDate(d + 3)} に有名ライターの来店取材が決定！ その日の出率が勝負`);
+    toast('来店取材が決まりました！');
+  } else if (roll < 0.09) {
+    const gain = 200 + rnd(600);
+    f.followers += gain;
+    note(`農園がテレビの地元特集で紹介された！ フォロワー +${gain}`);
+  } else if (roll < 0.11) {
+    for (const p of f.plots) if (p) p.prog += 2;
+    note('天候に恵まれて畑の育ちが早まった（＋2日）');
+  }
+  if (G.weather === 'typhoon') {
+    f.plots.forEach((p, i) => { if (p && Math.random() < 0.2) { f.plots[i] = null; note(`台風で${CROP[p.crop].name}の畑が1区画やられた…`); } });
+  }
+
+  // achievements
+  for (const a of ACHIEVEMENTS) if (!G.achieved.includes(a.id) && a.test()) {
+    G.achieved.push(a.id); G.money += a.reward;
+    note(`実績「${a.name}」達成！${a.reward ? ` ボーナス ${man(a.reward)}` : ''}`);
+    toast(`🏆 実績「${a.name}」達成！`);
+  }
+  G.weather = rollWeather(d + 1);
+}
+
+function viewStaff() {
+  const rows = HIRES.map(h => `<div class="item"><div class="info"><b>${h.name}</b><small>${h.desc}・日給 ${yen(h.wage)}</small></div>
+    <button class="btn ${G.hire[h.id] ? '' : 'sub'}" data-act="hire" data-v="${h.id}">${G.hire[h.id] ? '雇用中' : '雇う'}</button></div>`).join('');
+  const modes = SETTER_MODES.map(m => `<button class="cbtn ${G.hire.mode === m.id ? 'on' : ''}" data-act="mode" data-v="${m.id}">${m.name}</button>`).join('');
+  const broken = G.machines.filter(m => m.broken);
+  return `<div class="card"><h3><span>専門スタッフ</span><span class="num">人件費 ${yen(hireCost())}/日</span></h3>${rows}
+      <div class="chips" style="gap:6px"><span style="width:auto">設定士の方針</span>${modes}</div>
+      <p class="muted">設定士を雇うと、設定タブの手動設定は毎朝上書きされます。雇用中のボタンをもう一度押すと解雇します。</p></div>
+    ${broken.length ? `<div class="card"><h3>故障中の台</h3>${broken.map(m => `<div class="item"><div class="info"><b>${m.id}番 ${esc(MODEL[m.model].name)}</b><small>修理しないと稼働しません</small></div><button class="btn" data-act="repair" data-v="${m.id}">修理 ${man(20000)}</button></div>`).join('')}</div>` : ''}`;
+}
+function viewRival() {
+  const r = G.rival;
+  let next = '';
+  for (let d = G.day; d < G.day + 31; d++) { const e = rivalEventOf(d); if (e) { next = `${fmtDate(d)} ${e === 2 ? '大型イベント' : 'イベント'}`; break; } }
+  return `<div class="card"><h3><span>ライバル店</span><span>${r.gone ? '撤退中' : esc(r.name)}</span></h3>
+    ${r.gone ? `<p class="muted">${fmtDate(r.back)} ごろ新しいライバルが来そうです。</p>` : `
+      <div class="stats"><div class="stat"><small>強さ</small><b>${Math.round(r.power)}</b></div>
+      <div class="stat"><small>次のイベント</small><b style="font-size:12px">${next || '—'}</b></div>
+      <div class="stat"><small>撤退まで</small><b>${r.lose}/30日</b></div></div>
+      <p class="muted">${r.mod}のつく日と15日にイベントをします。その日はお客さんを取られますが、同じ日にこちらもイベ日にすると、評判とイベ信頼度が高いほうがお客さんを奪えます。評判がライバルの強さを10以上上回る日が続くと撤退します。</p>`}</div>`;
+}
+function viewAchievements() {
+  return `<div class="card"><h3><span>実績</span><span>${G.achieved.length}/${ACHIEVEMENTS.length}</span></h3>
+    ${ACHIEVEMENTS.map(a => `<div class="item"><div class="info"><b>${G.achieved.includes(a.id) ? '🏆' : '・'} ${a.name}</b><small>${a.reward ? 'ボーナス ' + man(a.reward) : '名誉のみ'}</small></div><span class="${G.achieved.includes(a.id) ? 'pos' : 'muted'}">${G.achieved.includes(a.id) ? '達成' : '未達成'}</span></div>`).join('')}</div>`;
+}
+
 // ---------- Actions ----------
 $('main').addEventListener('click', e => {
   const b = e.target.closest('[data-act]');
@@ -860,6 +1063,15 @@ $('main').addEventListener('click', e => {
     G.staff = Math.max(1, G.staff + +b.dataset.v);
   } else if (a === 'ad') {
     G.ad = +b.dataset.v;
+  } else if (a === 'hire') {
+    G.hire[b.dataset.v] = !G.hire[b.dataset.v];
+    const h = HIRES.find(x => x.id === b.dataset.v);
+    toast(G.hire[h.id] ? `${h.name}を雇いました` : `${h.name}を解雇しました`);
+  } else if (a === 'mode') {
+    G.hire.mode = b.dataset.v;
+  } else if (a === 'repair') {
+    const m = G.machines.find(x => x.id === +b.dataset.v);
+    if (m && G.money >= 20000) { m.broken = 0; G.money -= 20000; toast(`${m.id}番台を修理しました`); }
   } else if (a.startsWith('f-')) {
     farmAction(a, b);
   } else if (a === 'reset') {
@@ -885,9 +1097,9 @@ function showOver(title, html, btns) {
   o.querySelectorAll('button').forEach(b => b.onclick = btns[+b.dataset.i][1]);
 }
 function closeOver() { $('over').hidden = true; }
-function reset() { stopAuto(); G = newGame(); calMonth = null; closeOver(); save(); render(); }
+function reset() { stopAuto(); G = newExtras(newGame()); calMonth = null; closeOver(); save(); render(); }
 
-G = load() || newGame();
+G = newExtras(load() || newGame());
 render();
 </script>
 </body>
