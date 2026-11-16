@@ -81,7 +81,7 @@
   <div id="result" class="result" hidden></div>
   <input id="nameIn" maxlength="12" placeholder="なまえ" aria-label="なまえ">
   <button id="playBtn">あそぶ</button>
-  <p>指（マウス）の方向に進む。自分より小さいセルを食べて大きくなろう。<br>分裂：スペース／発射：W／味方にもらう：E<br>★の付いた3体は味方。一緒に戦ってくれるけど、大きさしだいでお互い食べられる。</p>
+  <p>指（マウス）の方向に進む。自分より小さいセルを食べて大きくなろう。<br>分裂：スペース／発射：W／味方にもらう：E<br>敵はいない。みんな味方！★の3体はあなたについてきて手伝ってくれる。味方とは大きさしだいでお互い食べられる。</p>
 </div></div>
 
 <script>
@@ -96,6 +96,8 @@ const BOT_NAMES = ['もちもち', 'たこやき', 'ぷにぷに', 'まんまる
 const ALLY_NAMES = ['ナイト', 'ガード', 'サポート'];
 const ALLY_MASS = 35, ALLY_FOOD = 1.5, KILL_SHARE = 0.5, AUTO_FEED_S = 5;
 const sameTeam = (a, b) => a === b || (a.team && a.team === b.team);
+// the three ★ allies stick with the player; every other bot is a friendly free roamer
+const isFollower = o => !!o.follower;
 const SHIELD_MS = 3000; // a fresh player can't be eaten for a moment
 const radius = m => Math.sqrt(m) * 6;
 const speedOf = m => 520 * Math.pow(m, -0.33);
@@ -123,7 +125,7 @@ function resetWorld() {
   grid = Array.from({ length: GN * GN }, () => []);
   food = []; for (let i = 0; i < FOOD_N; i++) food.push(spawnFood());
   for (let i = 0; i < VIRUS_N; i++) viruses.push(newVirus(rand(200, WORLD - 200), rand(200, WORLD - 200)));
-  for (let i = 0; i < BOT_N; i++) spawnOwner(BOT_NAMES[i % BOT_NAMES.length] + (i >= BOT_NAMES.length ? Math.floor(i / BOT_NAMES.length) + 1 : ''), false, rand(12, 120));
+  for (let i = 0; i < BOT_N; i++) spawnOwner(BOT_NAMES[i % BOT_NAMES.length] + (i >= BOT_NAMES.length ? Math.floor(i / BOT_NAMES.length) + 1 : ''), false, rand(12, 120)).team = 'me';
 }
 function newVirus(x, y) { return { x, y, m: VIRUS_MASS, vx: 0, vy: 0, fed: 0 }; }
 function spawnOwner(name, isPlayer, mass = START_MASS) {
@@ -172,8 +174,8 @@ function eject(o, aim) {
     const a = Math.atan2((aim ? aim.y : o.ty) - c.y, (aim ? aim.x : o.tx) - c.x) + rand(-0.1, 0.1);
     c.m -= EJECT_COST;
     const r = radius(c.m);
-    const v = o.team && o !== me ? 1700 : 900; // gifts fly farther so a moving player can catch them
-    ejects.push({ x: c.x + Math.cos(a) * r, y: c.y + Math.sin(a) * r, vx: Math.cos(a) * v, vy: Math.sin(a) * v, m: EJECT_MASS, c: o.color, born: performance.now(), gift: o.team && o !== me ? o : null });
+    const v = isFollower(o) ? 1700 : 900; // gifts fly farther so a moving player can catch them
+    ejects.push({ x: c.x + Math.cos(a) * r, y: c.y + Math.sin(a) * r, vx: Math.cos(a) * v, vy: Math.sin(a) * v, m: EJECT_MASS, c: o.color, born: performance.now(), gift: isFollower(o) ? o : null });
   }
 }
 // a cell that eats a virus bursts into many small pieces
@@ -207,7 +209,7 @@ function shareKill(ally, prey) {
 function askFeed() {
   let n = 0;
   for (const o of owners) {
-    if (!o.team || o === me || !o.alive || massOf(o) < 60) continue;
+    if (!isFollower(o) || !o.alive || massOf(o) < 60) continue;
     o.feed = 3; o.think = 0; n++;
   }
   flash(n ? `味方 ${n}体 が分けに来てくれるよ！` : '味方がまだ小さくて分けられない…');
@@ -227,15 +229,15 @@ function botThink(o) {
   const mine = cellsOf(o);
   if (!mine.length) return;
   const big = mine.reduce((a, c) => c.m > a.m ? c : a);
-  const r = radius(big.m), view = (o.team ? 700 : 500) + r * (o.team ? 5 : 4);
-  const leader = o.team && me && me.alive ? cellsOf(me).reduce((a, c) => !a || c.m > a.m ? c : a, null) : null;
+  const r = radius(big.m), view = (isFollower(o) ? 700 : 500) + r * (isFollower(o) ? 5 : 4);
+  const leader = isFollower(o) && me && me.alive ? cellsOf(me).reduce((a, c) => !a || c.m > a.m ? c : a, null) : null;
   let fx = 0, fy = 0, prey = null, preyScore = 0;
   for (const c of cells) {
     if (sameTeam(c.o, o)) continue;
     const dx = c.x - big.x, dy = c.y - big.y, d = Math.hypot(dx, dy);
     if (d > view) continue;
     // allies only hunt around the player
-    if (o.team && leader && c.m < big.m && Math.hypot(c.x - leader.x, c.y - leader.y) > 900) continue;
+    if (leader && c.m < big.m && Math.hypot(c.x - leader.x, c.y - leader.y) > 900) continue;
     if (c.m > big.m * EAT_RATIO) {
       // while helping, allies brave the enemy that's pinned against the player
       if (o.team && crisis && c === crisis.e) continue;
@@ -253,7 +255,7 @@ function botThink(o) {
     const dx = leader.x - big.x, dy = leader.y - big.y, d = Math.hypot(dx, dy) || 1;
     if (d > 450 + radius(leader.m) && Math.hypot(fx, fy) > 0.6) { fx += dx / d * 1.5; fy += dy / d * 1.5; }
   }
-  if (!o.team && big.m > VIRUS_MASS * 1.3) for (const v of viruses) {
+  if (!isFollower(o) && big.m > VIRUS_MASS * 1.3) for (const v of viruses) {
     const dx = v.x - big.x, dy = v.y - big.y, d = Math.hypot(dx, dy);
     if (d < r + 160) { fx -= dx / d * 2; fy -= dy / d * 2; }
   }
@@ -261,7 +263,7 @@ function botThink(o) {
   const now = performance.now();
   if (leader && !o.feed && now > (o.nextGift || 0) && big.m > 70 && massOf(o) > massOf(me) * 0.35) { o.feed = 2; o.nextGift = now + AUTO_FEED_S * 1000; }
   // the player is stuck against an enemy it can't eat yet: help it win
-  if (o.team && crisis && Math.hypot(fx, fy) < 6) {
+  if (isFollower(o) && crisis && Math.hypot(fx, fy) < 6) {
     const { pc, e } = crisis;
     if (big.m > e.m * EAT_RATIO) {
       // strong enough to take the enemy ourselves
@@ -286,7 +288,7 @@ function botThink(o) {
   }
   // allies sweep away spikes near the player
   let spike = null;
-  if (o.team && leader) {
+  if (leader) {
     let bd = Infinity;
     for (const v of viruses) {
       if (Math.hypot(v.x - leader.x, v.y - leader.y) > radius(leader.m) + 700) continue;
@@ -299,12 +301,12 @@ function botThink(o) {
   o.far = !!far;
   const fear = Math.hypot(fx, fy);
   if (spike && fear < 4) { tx = spike.x; ty = spike.y; }
-  else if (fear > (far ? 4 : o.team ? 2 : 0.6)) { tx = big.x + fx * 300; ty = big.y + fy * 300; }
+  else if (fear > (far ? 4 : isFollower(o) ? 2 : 0.6)) { tx = big.x + fx * 300; ty = big.y + fy * 300; }
   else if (far) { const fp = followPoint(leader, big); tx = fp.x; ty = fp.y; }
   else if (prey) {
     tx = prey.x; ty = prey.y;
     const d = Math.hypot(prey.x - big.x, prey.y - big.y);
-    if (big.m / 2 > prey.m * EAT_RATIO && d < (o.team ? 420 : 320) + r && mine.length < (o.team ? 8 : 4) && Math.random() < (o.team ? 0.6 : 0.3)) { o.tx = tx; o.ty = ty; split(o); }
+    if (big.m / 2 > prey.m * EAT_RATIO && d < (isFollower(o) ? 420 : 320) + r && mine.length < (isFollower(o) ? 8 : 4) && Math.random() < (isFollower(o) ? 0.6 : 0.3)) { o.tx = tx; o.ty = ty; split(o); }
   } else if (leader && Math.hypot(leader.x - big.x, leader.y - big.y) > 450 + radius(leader.m)) {
     // too far from the player: catch up
     const fp = followPoint(leader, big); tx = fp.x + rand(-150, 150); ty = fp.y + rand(-150, 150);
@@ -356,7 +358,7 @@ function update(dt) {
   }
   const prevCrisis = crisis;
   crisis = findCrisis();
-  if (crisis && !prevCrisis) for (const o of owners) if (o.team && o !== me) o.think = 0;
+  if (crisis && !prevCrisis) for (const o of owners) if (isFollower(o)) o.think = 0;
   for (const o of owners) if (!o.isPlayer && o.alive && (o.think -= dt) <= 0) { o.think = rand(0.15, 0.35); botThink(o); }
 
   // move cells
@@ -398,7 +400,7 @@ function update(dt) {
       for (let i = b.length - 1; i >= 0; i--) {
         const f = b[i];
         if ((f.x - c.x) ** 2 + (f.y - c.y) ** 2 < r * r) {
-          c.m += f.m * (c.o.team && c.o !== me ? ALLY_FOOD : 1); b.splice(i, 1);
+          c.m += f.m * (isFollower(c.o) ? ALLY_FOOD : 1); b.splice(i, 1);
           f.x = rand(0, WORLD); f.y = rand(0, WORLD); f.c = pick(COLORS); addFood(f);
         }
       }
@@ -426,7 +428,7 @@ function update(dt) {
     const young = now - e.born < 250;
     // an ally's gift is only for the player (who can catch it right away); enemies can still steal it
     for (const c of cells) {
-      if (e.gift ? (c.o.team && c.o !== me) || (young && c.o !== me) : young) continue;
+      if (e.gift ? (c.o !== me && (c.o.team || young)) : young) continue;
       if (c.m > EJECT_MASS * 1.1 && Math.hypot(c.x - e.x, c.y - e.y) < radius(c.m)) { c.m += e.m; e.dead = true; if (e.gift && c.o === me) e.gift.given = (e.gift.given || 0) + e.m; break; }
     }
   }
@@ -438,7 +440,7 @@ function update(dt) {
   }
   // cells eat viruses (and burst)
   for (const c of cells) {
-    const ally = c.o.team && c.o !== me;
+    const ally = isFollower(c.o);
     if (!ally && c.m < VIRUS_MASS * 1.3) continue;
     for (const v of viruses) {
       if (v.dead) continue;
@@ -467,8 +469,8 @@ function update(dt) {
       if (Math.abs(dx) > ra || Math.abs(dy) > ra) continue;
       if (Math.hypot(dx, dy) < ra - radius(b.m) * 0.4) {
         a.m += b.m; b.dead = true;
-        if (a.o.team && a.o !== me && !b.o.team && me && me.alive) shareKill(a.o, b);
-        if (a.o === me && b.o.team && b.o !== me) { b.o.given = (b.o.given || 0) + b.m; if (crisis) flash(`${b.o.name}が体を差し出した！ +${Math.round(b.m)}`); }
+        if (isFollower(a.o) && !b.o.team && me && me.alive) shareKill(a.o, b);
+        if (a.o === me && isFollower(b.o)) { b.o.given = (b.o.given || 0) + b.m; if (crisis) flash(`${b.o.name}が体を差し出した！ +${Math.round(b.m)}`); }
       }
     }
   }
@@ -484,9 +486,9 @@ function update(dt) {
     } else o.peak = Math.max(o.peak, m);
   }
   for (const o of owners) if (!o.isPlayer && !o.alive && now - o.diedAt > 3000) {
-    if (o.team && !(me && me.alive)) continue;
+    if (isFollower(o) && !(me && me.alive)) continue;
     o.alive = true; o.peak = START_MASS;
-    if (o.team) { const c = cellsOf(me)[0]; cells.push(newCell(o, c.x + rand(-200, 200), c.y + rand(-200, 200), ALLY_MASS)); o.shield = now + SHIELD_MS; continue; }
+    if (isFollower(o)) { const c = cellsOf(me)[0]; cells.push(newCell(o, c.x + rand(-200, 200), c.y + rand(-200, 200), ALLY_MASS)); o.shield = now + SHIELD_MS; continue; }
     o.color = pick(COLORS);
     const p = safeSpot(); cells.push(newCell(o, p.x, p.y, rand(12, 40)));
   }
@@ -584,7 +586,7 @@ function drawMini() {
   mctx.strokeStyle = '#dde4ec'; mctx.lineWidth = 1;
   for (let i = 1; i < 5; i++) { mctx.beginPath(); mctx.moveTo(i * 22, 0); mctx.lineTo(i * 22, 110); mctx.moveTo(0, i * 22); mctx.lineTo(110, i * 22); mctx.stroke(); }
   for (const c of cells) {
-    if (c.o !== me && !c.o.team && c.m < 200) continue;
+    if (c.o !== me && !isFollower(c.o) && c.m < 200) continue;
     mctx.fillStyle = c.o.color; mctx.beginPath(); mctx.arc(c.x * s, c.y * s, Math.max(1.5, radius(c.m) * s), 0, Math.PI * 2); mctx.fill();
   }
   if (me && me.alive) { mctx.strokeStyle = '#1d2733'; mctx.lineWidth = 1.5; mctx.beginPath(); mctx.arc(cam.x * s, cam.y * s, 5, 0, Math.PI * 2); mctx.stroke(); }
@@ -598,14 +600,14 @@ function updateHud(dt) {
   const alive = owners.filter(o => o.alive).map(o => ({ o, m: massOf(o) })).sort((a, b) => b.m - a.m);
   const top = alive.slice(0, 10);
   const esc = s => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-  let html = top.map(x => `<li class="${x.o === me ? 'me' : x.o.team ? 'ally' : ''}">${esc(x.o.name)}</li>`).join('');
+  let html = top.map(x => `<li class="${x.o === me ? 'me' : isFollower(x.o) ? 'ally' : ''}">${esc(x.o.name)}</li>`).join('');
   const myRank = alive.findIndex(x => x.o === me);
   if (myRank >= 10) html += `<li class="me" value="${myRank + 1}">${esc(me.name)}</li>`;
   document.getElementById('rank').innerHTML = html;
   if (me && me.alive) {
     const m = massOf(me); best = Math.max(best, m);
     document.getElementById('score').textContent = `大きさ ${Math.round(m)}`;
-    document.getElementById('contrib').innerHTML = '<b>味方からもらった量</b>' + owners.filter(o => o.team && o !== me)
+    document.getElementById('contrib').innerHTML = '<b>味方からもらった量</b>' + owners.filter(isFollower)
       .map(o => `<div>${esc(o.name)}<span>+${Math.round(o.given || 0)}${o.cleared ? `・トゲ${o.cleared}` : ''}</span></div>`).join('');
   }
 }
@@ -616,7 +618,7 @@ function start() {
   const name = document.getElementById('nameIn').value.trim() || 'あなた';
   try { localStorage.setItem('cells_name', name); } catch (e) {}
   // allies outlive the player: keep the ones still in the arena and come back next to the biggest
-  const allies = owners.filter(o => o.team && !o.isPlayer);
+  const allies = owners.filter(isFollower);
   cells = cells.filter(c => !c.o.isPlayer);
   owners = owners.filter(o => !o.isPlayer);
   me = spawnOwner(name, true);
@@ -630,7 +632,7 @@ function start() {
     if (lc) { const a = rand(0, Math.PI * 2), d = radius(lc.m) + 140; home.x = clamp(lc.x + Math.cos(a) * d, 50, WORLD - 50); home.y = clamp(lc.y + Math.sin(a) * d, 50, WORLD - 50); }
     for (const o of allies) { o.shield = me.shield; o.think = 0; o.feed = 0; }
   } else for (const n of ALLY_NAMES) {
-    const a = { id: nextId++, name: '★' + n, color: me.color, isPlayer: false, team: 'me', alive: true, tx: home.x, ty: home.y, think: 0, peak: START_MASS, shield: me.shield };
+    const a = { id: nextId++, name: '★' + n, color: me.color, isPlayer: false, team: 'me', follower: true, alive: true, tx: home.x, ty: home.y, think: 0, peak: START_MASS, shield: me.shield };
     owners.push(a);
     cells.push(newCell(a, home.x + rand(-160, 160), home.y + rand(-160, 160), ALLY_MASS));
   }
