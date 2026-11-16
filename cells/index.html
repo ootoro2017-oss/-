@@ -166,10 +166,10 @@ function split(o) {
     cells.push(n);
   }
 }
-function eject(o) {
+function eject(o, aim) {
   for (const c of cellsOf(o)) {
     if (c.m < EJECT_COST + 12) continue;
-    const a = Math.atan2(o.ty - c.y, o.tx - c.x) + rand(-0.1, 0.1);
+    const a = Math.atan2((aim ? aim.y : o.ty) - c.y, (aim ? aim.x : o.tx) - c.x) + rand(-0.1, 0.1);
     c.m -= EJECT_COST;
     const r = radius(c.m);
     const v = o.team && o !== me ? 1700 : 900; // gifts fly farther so a moving player can catch them
@@ -237,6 +237,8 @@ function botThink(o) {
     // allies only hunt around the player
     if (o.team && leader && c.m < big.m && Math.hypot(c.x - leader.x, c.y - leader.y) > 900) continue;
     if (c.m > big.m * EAT_RATIO) {
+      // while helping, allies brave the enemy that's pinned against the player
+      if (o.team && crisis && c === crisis.e) continue;
       const w = (c.m / big.m) * 600 / Math.max(40, d - radius(c.m));
       fx -= dx / d * w; fy -= dy / d * w;
     } else if (big.m > c.m * EAT_RATIO) {
@@ -251,23 +253,53 @@ function botThink(o) {
     const dx = leader.x - big.x, dy = leader.y - big.y, d = Math.hypot(dx, dy) || 1;
     if (d > 450 + radius(leader.m) && Math.hypot(fx, fy) > 0.6) { fx += dx / d * 1.5; fy += dy / d * 1.5; }
   }
-  if (big.m > VIRUS_MASS * 1.3) for (const v of viruses) {
+  if (!o.team && big.m > VIRUS_MASS * 1.3) for (const v of viruses) {
     const dx = v.x - big.x, dy = v.y - big.y, d = Math.hypot(dx, dy);
     if (d < r + 160) { fx -= dx / d * 2; fy -= dy / d * 2; }
   }
   let tx, ty;
   const now = performance.now();
   if (leader && !o.feed && now > (o.nextGift || 0) && big.m > 70 && massOf(o) > massOf(me) * 0.35) { o.feed = 2; o.nextGift = now + AUTO_FEED_S * 1000; }
+  // the player is stuck against an enemy it can't eat yet: help it win
+  if (o.team && crisis && Math.hypot(fx, fy) < 6) {
+    const { pc, e } = crisis;
+    if (big.m > e.m * EAT_RATIO) {
+      // strong enough to take the enemy ourselves
+      o.tx = e.x; o.ty = e.y; o.far = true;
+      if (big.m / 2 > e.m * EAT_RATIO && Math.hypot(e.x - big.x, e.y - big.y) < 420 + r && mine.length < 8) split(o);
+      return;
+    }
+    if (mine.every(c => c.m * EAT_RATIO <= pc.m)) {
+      // small enough to be swallowed: dive into the player to make it bigger
+      o.tx = pc.x; o.ty = pc.y; o.far = true; o.sacrifice = now;
+      return;
+    }
+    o.feedTarget = pc;
+    if (!o.feed) o.feed = Math.min(6, Math.ceil(crisis.need / EJECT_MASS) + 1);
+  }
   if (o.feed > 0 && leader && Math.hypot(fx, fy) < 4) {
-    const fp = followPoint(leader, big); o.tx = fp.x; o.ty = fp.y;
-    if (Math.hypot(leader.x - big.x, leader.y - big.y) < radius(leader.m) + r + 260) { eject(o); o.feed--; o.think = 0.12; }
+    const ft = o.feedTarget && cells.includes(o.feedTarget) ? o.feedTarget : leader;
+    const fp = followPoint(ft, big); o.tx = fp.x; o.ty = fp.y;
+    if (Math.hypot(ft.x - big.x, ft.y - big.y) < radius(ft.m) + r + 260) { eject(o, ft); o.feed--; o.think = 0.12; if (!o.feed) o.feedTarget = null; }
     else o.far = true;
     return;
+  }
+  // allies sweep away spikes near the player
+  let spike = null;
+  if (o.team && leader) {
+    let bd = Infinity;
+    for (const v of viruses) {
+      if (Math.hypot(v.x - leader.x, v.y - leader.y) > radius(leader.m) + 700) continue;
+      const d = Math.hypot(v.x - big.x, v.y - big.y);
+      if (d < bd) { bd = d; spike = v; }
+    }
   }
   // an ally far from the player heads straight back unless something big is right on it
   const far = leader && Math.hypot(leader.x - big.x, leader.y - big.y) > 700 + radius(leader.m);
   o.far = !!far;
-  if (Math.hypot(fx, fy) > (far ? 4 : 0.6)) { tx = big.x + fx * 300; ty = big.y + fy * 300; }
+  const fear = Math.hypot(fx, fy);
+  if (spike && fear < 4) { tx = spike.x; ty = spike.y; }
+  else if (fear > (far ? 4 : o.team ? 2 : 0.6)) { tx = big.x + fx * 300; ty = big.y + fy * 300; }
   else if (far) { const fp = followPoint(leader, big); tx = fp.x; ty = fp.y; }
   else if (prey) {
     tx = prey.x; ty = prey.y;
@@ -291,12 +323,40 @@ function botThink(o) {
 }
 
 // ---------- Update ----------
+// new spikes grow back away from the player
+function spotAwayFromPlayer() {
+  const mine = me && me.alive ? cellsOf(me) : [];
+  for (let t = 0; t < 20; t++) {
+    const x = rand(200, WORLD - 200), y = rand(200, WORLD - 200);
+    if (mine.every(c => Math.hypot(c.x - x, c.y - y) > 1500)) return { x, y };
+  }
+  return { x: rand(200, WORLD - 200), y: rand(200, WORLD - 200) };
+}
+// a player cell touching an enemy it can't eat yet; pick the one closest to winnable
+let crisis = null;
+function findCrisis() {
+  if (!me || !me.alive) return null;
+  let bestC = null;
+  for (const pc of cellsOf(me)) {
+    const rp = radius(pc.m);
+    for (const e of cells) {
+      if (e.o.team || pc.m >= e.m * EAT_RATIO) continue;
+      if (Math.hypot(e.x - pc.x, e.y - pc.y) > rp + radius(e.m) + 60) continue;
+      const need = e.m * EAT_RATIO - pc.m + 2;
+      if (!bestC || need < bestC.need) bestC = { pc, e, need };
+    }
+  }
+  return bestC;
+}
 function update(dt) {
   const now = performance.now();
   if (me && me.alive) {
     const p = screenToWorld(pointer.x, pointer.y);
     me.tx = p.x; me.ty = p.y;
   }
+  const prevCrisis = crisis;
+  crisis = findCrisis();
+  if (crisis && !prevCrisis) for (const o of owners) if (o.team && o !== me) o.think = 0;
   for (const o of owners) if (!o.isPlayer && o.alive && (o.think -= dt) <= 0) { o.think = rand(0.15, 0.35); botThink(o); }
 
   // move cells
@@ -378,14 +438,21 @@ function update(dt) {
   }
   // cells eat viruses (and burst)
   for (const c of cells) {
-    if (c.m < VIRUS_MASS * 1.3) continue;
+    const ally = c.o.team && c.o !== me;
+    if (!ally && c.m < VIRUS_MASS * 1.3) continue;
     for (const v of viruses) {
       if (v.dead) continue;
-      if (Math.hypot(c.x - v.x, c.y - v.y) < radius(c.m) - radius(v.m) * 0.4) { v.dead = true; c.m += v.m; burst(c); break; }
+      const d = Math.hypot(c.x - v.x, c.y - v.y);
+      if (ally) {
+        // allies don't burst: they break the spike apart
+        if (d < radius(c.m) + radius(v.m) * 0.6) { v.dead = true; c.m += 15; c.o.cleared = (c.o.cleared || 0) + 1; break; }
+        continue;
+      }
+      if (d < radius(c.m) - radius(v.m) * 0.4) { v.dead = true; c.m += v.m; burst(c); break; }
     }
   }
   viruses = viruses.filter(v => !v.dead);
-  while (viruses.length < VIRUS_N) viruses.push(newVirus(rand(200, WORLD - 200), rand(200, WORLD - 200)));
+  while (viruses.length < VIRUS_N) { const p = spotAwayFromPlayer(); viruses.push(newVirus(p.x, p.y)); }
 
   // cells eat other owners' cells
   cells.sort((a, b) => b.m - a.m);
@@ -401,6 +468,7 @@ function update(dt) {
       if (Math.hypot(dx, dy) < ra - radius(b.m) * 0.4) {
         a.m += b.m; b.dead = true;
         if (a.o.team && a.o !== me && !b.o.team && me && me.alive) shareKill(a.o, b);
+        if (a.o === me && b.o.team && b.o !== me) { b.o.given = (b.o.given || 0) + b.m; if (crisis) flash(`${b.o.name}が体を差し出した！ +${Math.round(b.m)}`); }
       }
     }
   }
@@ -538,7 +606,7 @@ function updateHud(dt) {
     const m = massOf(me); best = Math.max(best, m);
     document.getElementById('score').textContent = `大きさ ${Math.round(m)}`;
     document.getElementById('contrib').innerHTML = '<b>味方からもらった量</b>' + owners.filter(o => o.team && o !== me)
-      .map(o => `<div>${esc(o.name)}<span>+${Math.round(o.given || 0)}</span></div>`).join('');
+      .map(o => `<div>${esc(o.name)}<span>+${Math.round(o.given || 0)}${o.cleared ? `・トゲ${o.cleared}` : ''}</span></div>`).join('');
   }
 }
 
