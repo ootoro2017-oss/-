@@ -27,6 +27,10 @@
     border: 0; border-radius: 10px; padding: 6px 12px; font: inherit; font-weight: 800; font-size: 13px; background: var(--panel); color: var(--ink); cursor: pointer; }
   #resetBtn.armed { background: var(--accent); color: #fff; }
   #resetBtn:focus-visible { outline: 3px solid #3a86ff; outline-offset: 2px; }
+  #contrib { top: calc(88px + env(safe-area-inset-top, 0px)); left: max(12px, env(safe-area-inset-left, 0px));
+    background: var(--panel); border-radius: 10px; padding: 6px 10px; font-size: 11px; min-width: 130px; font-variant-numeric: tabular-nums; }
+  #contrib b { display: block; font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+  #contrib div { color: #0ead69; font-weight: 800; display: flex; justify-content: space-between; gap: 10px; }
   #score { top: calc(10px + env(safe-area-inset-top, 0px)); left: max(12px, env(safe-area-inset-left, 0px));
     background: var(--panel); border-radius: 10px; padding: 6px 12px; font-weight: 800; font-size: 15px; font-variant-numeric: tabular-nums; }
   #board { top: calc(10px + env(safe-area-inset-top, 0px)); right: max(12px, env(safe-area-inset-right, 0px));
@@ -66,6 +70,7 @@
 <body>
 <canvas id="cv"></canvas>
 <div id="score" class="hud"></div>
+<div id="contrib" class="hud"></div>
 <button id="resetBtn" hidden>↺ リセット</button>
 <div id="board" class="hud"><h4>ランキング</h4><ol id="rank"></ol></div>
 <canvas id="mini" class="hud"></canvas>
@@ -89,6 +94,7 @@ const BOT_NAMES = ['もちもち', 'たこやき', 'ぷにぷに', 'まんまる
   'おにぎり', 'てんとう虫', 'ぴよぴよ', 'ゼリー', 'みかん', 'アメーバ', 'ばくだん', 'とうふ', 'こんぺいとう', 'だんご', 'はらぺこ', 'すいか', 'ラムネ', 'わたあめ', 'くらげ'];
 
 const ALLY_NAMES = ['ナイト', 'ガード', 'サポート'];
+const ALLY_MASS = 35, ALLY_FOOD = 1.5, KILL_SHARE = 0.5, AUTO_FEED_S = 5;
 const sameTeam = (a, b) => a === b || (a.team && a.team === b.team);
 const SHIELD_MS = 3000; // a fresh player can't be eaten for a moment
 const radius = m => Math.sqrt(m) * 6;
@@ -167,7 +173,7 @@ function eject(o) {
     c.m -= EJECT_COST;
     const r = radius(c.m);
     const v = o.team && o !== me ? 1700 : 900; // gifts fly farther so a moving player can catch them
-    ejects.push({ x: c.x + Math.cos(a) * r, y: c.y + Math.sin(a) * r, vx: Math.cos(a) * v, vy: Math.sin(a) * v, m: EJECT_MASS, c: o.color, born: performance.now(), gift: !!(o.team && o !== me) });
+    ejects.push({ x: c.x + Math.cos(a) * r, y: c.y + Math.sin(a) * r, vx: Math.cos(a) * v, vy: Math.sin(a) * v, m: EJECT_MASS, c: o.color, born: performance.now(), gift: o.team && o !== me ? o : null });
   }
 }
 // a cell that eats a virus bursts into many small pieces
@@ -187,6 +193,15 @@ function burst(c) {
   }
 }
 
+// an ally's kill also feeds the player a share, so teamwork pays off
+function shareKill(ally, prey) {
+  const mine = cellsOf(me);
+  if (!mine.length) return;
+  const bonus = prey.m * KILL_SHARE;
+  mine.reduce((a, c) => c.m > a.m ? c : a).m += bonus;
+  ally.given = (ally.given || 0) + bonus;
+  if (bonus >= 8) flash(`${ally.name}が「${prey.o.name}」を倒した！ +${Math.round(bonus)}`);
+}
 // allies shoot some of their mass toward the player
 // allies come over and shoot some of their mass at the player
 function askFeed() {
@@ -212,7 +227,7 @@ function botThink(o) {
   const mine = cellsOf(o);
   if (!mine.length) return;
   const big = mine.reduce((a, c) => c.m > a.m ? c : a);
-  const r = radius(big.m), view = 500 + r * 4;
+  const r = radius(big.m), view = (o.team ? 700 : 500) + r * (o.team ? 5 : 4);
   const leader = o.team && me && me.alive ? cellsOf(me).reduce((a, c) => !a || c.m > a.m ? c : a, null) : null;
   let fx = 0, fy = 0, prey = null, preyScore = 0;
   for (const c of cells) {
@@ -225,7 +240,9 @@ function botThink(o) {
       const w = (c.m / big.m) * 600 / Math.max(40, d - radius(c.m));
       fx -= dx / d * w; fy -= dy / d * w;
     } else if (big.m > c.m * EAT_RATIO) {
-      const s = c.m / Math.max(60, d);
+      // allies go first for enemies that are close to the player
+      const guard = leader && Math.hypot(c.x - leader.x, c.y - leader.y) < radius(leader.m) + 400 ? 3 : 1;
+      const s = c.m / Math.max(60, d) * guard;
       if (s > preyScore) { preyScore = s; prey = c; }
     }
   }
@@ -239,6 +256,8 @@ function botThink(o) {
     if (d < r + 160) { fx -= dx / d * 2; fy -= dy / d * 2; }
   }
   let tx, ty;
+  const now = performance.now();
+  if (leader && !o.feed && now > (o.nextGift || 0) && big.m > 70 && massOf(o) > massOf(me) * 0.35) { o.feed = 2; o.nextGift = now + AUTO_FEED_S * 1000; }
   if (o.feed > 0 && leader && Math.hypot(fx, fy) < 4) {
     const fp = followPoint(leader, big); o.tx = fp.x; o.ty = fp.y;
     if (Math.hypot(leader.x - big.x, leader.y - big.y) < radius(leader.m) + r + 260) { eject(o); o.feed--; o.think = 0.12; }
@@ -253,7 +272,7 @@ function botThink(o) {
   else if (prey) {
     tx = prey.x; ty = prey.y;
     const d = Math.hypot(prey.x - big.x, prey.y - big.y);
-    if (big.m / 2 > prey.m * EAT_RATIO && d < 320 + r && mine.length < 4 && Math.random() < 0.3) { o.tx = tx; o.ty = ty; split(o); }
+    if (big.m / 2 > prey.m * EAT_RATIO && d < (o.team ? 420 : 320) + r && mine.length < (o.team ? 8 : 4) && Math.random() < (o.team ? 0.6 : 0.3)) { o.tx = tx; o.ty = ty; split(o); }
   } else if (leader && Math.hypot(leader.x - big.x, leader.y - big.y) > 450 + radius(leader.m)) {
     // too far from the player: catch up
     const fp = followPoint(leader, big); tx = fp.x + rand(-150, 150); ty = fp.y + rand(-150, 150);
@@ -319,7 +338,7 @@ function update(dt) {
       for (let i = b.length - 1; i >= 0; i--) {
         const f = b[i];
         if ((f.x - c.x) ** 2 + (f.y - c.y) ** 2 < r * r) {
-          c.m += f.m; b.splice(i, 1);
+          c.m += f.m * (c.o.team && c.o !== me ? ALLY_FOOD : 1); b.splice(i, 1);
           f.x = rand(0, WORLD); f.y = rand(0, WORLD); f.c = pick(COLORS); addFood(f);
         }
       }
@@ -348,7 +367,7 @@ function update(dt) {
     // an ally's gift is only for the player (who can catch it right away); enemies can still steal it
     for (const c of cells) {
       if (e.gift ? (c.o.team && c.o !== me) || (young && c.o !== me) : young) continue;
-      if (c.m > EJECT_MASS * 1.1 && Math.hypot(c.x - e.x, c.y - e.y) < radius(c.m)) { c.m += e.m; e.dead = true; break; }
+      if (c.m > EJECT_MASS * 1.1 && Math.hypot(c.x - e.x, c.y - e.y) < radius(c.m)) { c.m += e.m; e.dead = true; if (e.gift && c.o === me) e.gift.given = (e.gift.given || 0) + e.m; break; }
     }
   }
   ejects = ejects.filter(e => !e.dead);
@@ -379,7 +398,10 @@ function update(dt) {
       if (b.dead || b.o === a.o || a.m < b.m * EAT_RATIO || b.o.shield > now || (sameTeam(a.o, b.o) && a.o !== me && b.o !== me)) continue;
       const dx = b.x - a.x, dy = b.y - a.y;
       if (Math.abs(dx) > ra || Math.abs(dy) > ra) continue;
-      if (Math.hypot(dx, dy) < ra - radius(b.m) * 0.4) { a.m += b.m; b.dead = true; }
+      if (Math.hypot(dx, dy) < ra - radius(b.m) * 0.4) {
+        a.m += b.m; b.dead = true;
+        if (a.o.team && a.o !== me && !b.o.team && me && me.alive) shareKill(a.o, b);
+      }
     }
   }
   cells = cells.filter(c => !c.dead);
@@ -396,7 +418,7 @@ function update(dt) {
   for (const o of owners) if (!o.isPlayer && !o.alive && now - o.diedAt > 3000) {
     if (o.team && !(me && me.alive)) continue;
     o.alive = true; o.peak = START_MASS;
-    if (o.team) { const c = cellsOf(me)[0]; cells.push(newCell(o, c.x + rand(-200, 200), c.y + rand(-200, 200), START_MASS)); o.shield = now + SHIELD_MS; continue; }
+    if (o.team) { const c = cellsOf(me)[0]; cells.push(newCell(o, c.x + rand(-200, 200), c.y + rand(-200, 200), ALLY_MASS)); o.shield = now + SHIELD_MS; continue; }
     o.color = pick(COLORS);
     const p = safeSpot(); cells.push(newCell(o, p.x, p.y, rand(12, 40)));
   }
@@ -515,6 +537,8 @@ function updateHud(dt) {
   if (me && me.alive) {
     const m = massOf(me); best = Math.max(best, m);
     document.getElementById('score').textContent = `大きさ ${Math.round(m)}`;
+    document.getElementById('contrib').innerHTML = '<b>味方からもらった量</b>' + owners.filter(o => o.team && o !== me)
+      .map(o => `<div>${esc(o.name)}<span>+${Math.round(o.given || 0)}</span></div>`).join('');
   }
 }
 
@@ -532,7 +556,7 @@ function start() {
   for (const n of ALLY_NAMES) {
     const a = { id: nextId++, name: '★' + n, color: me.color, isPlayer: false, team: 'me', alive: true, tx: home.x, ty: home.y, think: 0, peak: START_MASS, shield: me.shield };
     owners.push(a);
-    cells.push(newCell(a, home.x + rand(-160, 160), home.y + rand(-160, 160), START_MASS));
+    cells.push(newCell(a, home.x + rand(-160, 160), home.y + rand(-160, 160), ALLY_MASS));
   }
   best = START_MASS; startT = performance.now(); playing = true;
   menu.hidden = true;
