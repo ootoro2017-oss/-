@@ -615,13 +615,21 @@ const menu = document.getElementById('menu');
 function start() {
   const name = document.getElementById('nameIn').value.trim() || 'あなた';
   try { localStorage.setItem('cells_name', name); } catch (e) {}
-  cells = cells.filter(c => !c.o.isPlayer && !c.o.team);
-  owners = owners.filter(o => !o.isPlayer && !o.team);
+  // allies outlive the player: keep the ones still in the arena and come back next to the biggest
+  const allies = owners.filter(o => o.team && !o.isPlayer);
+  cells = cells.filter(c => !c.o.isPlayer);
+  owners = owners.filter(o => !o.isPlayer);
   me = spawnOwner(name, true);
   me.team = 'me';
   me.shield = performance.now() + SHIELD_MS;
   const home = cellsOf(me)[0];
-  for (const n of ALLY_NAMES) {
+  if (allies.length) {
+    me.color = allies[0].color;
+    const lead = allies.filter(o => o.alive).sort((x, y) => massOf(y) - massOf(x))[0];
+    const lc = lead && cellsOf(lead).sort((x, y) => y.m - x.m)[0];
+    if (lc) { const a = rand(0, Math.PI * 2), d = radius(lc.m) + 140; home.x = clamp(lc.x + Math.cos(a) * d, 50, WORLD - 50); home.y = clamp(lc.y + Math.sin(a) * d, 50, WORLD - 50); }
+    for (const o of allies) { o.shield = me.shield; o.think = 0; o.feed = 0; }
+  } else for (const n of ALLY_NAMES) {
     const a = { id: nextId++, name: '★' + n, color: me.color, isPlayer: false, team: 'me', alive: true, tx: home.x, ty: home.y, think: 0, peak: START_MASS, shield: me.shield };
     owners.push(a);
     cells.push(newCell(a, home.x + rand(-160, 160), home.y + rand(-160, 160), ALLY_MASS));
