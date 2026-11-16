@@ -25,7 +25,7 @@
   #score { top: calc(10px + env(safe-area-inset-top, 0px)); left: max(12px, env(safe-area-inset-left, 0px));
     background: var(--panel); border-radius: 10px; padding: 6px 12px; font-weight: 800; font-size: 14px; font-variant-numeric: tabular-nums; line-height: 1.4; }
   #score small { display: block; font-size: 11px; color: var(--muted); font-weight: 500; }
-  #resetBtn { position: fixed; z-index: 3; top: calc(64px + env(safe-area-inset-top, 0px)); left: max(12px, env(safe-area-inset-left, 0px));
+  #resetBtn { position: fixed; z-index: 6; top: calc(64px + env(safe-area-inset-top, 0px)); left: max(12px, env(safe-area-inset-left, 0px));
     border: 0; border-radius: 10px; padding: 6px 12px; font: inherit; font-weight: 800; font-size: 13px; background: var(--panel); color: var(--ink); cursor: pointer; }
   #resetBtn.armed { background: var(--hot); color: #fff; }
   #board { top: calc(10px + env(safe-area-inset-top, 0px)); right: max(12px, env(safe-area-inset-right, 0px));
@@ -85,7 +85,7 @@
 
 <script>
 // ---------- Tuning ----------
-const WORLD = 4000, U = 18, FOOD_N = 3000, BOT_N = 20;
+const WORLD = 4000, U = 18, FOOD_N = 1000, BOT_N = 20;
 const COLORS = ['#2f6bff', '#ff5a3c', '#18b87a', '#ffb31f', '#9b5cff', '#ff4fa3', '#00a7c7', '#7a8b00', '#e0632a', '#4b5cc4'];
 const NAMES = ['カクカク', 'ブロッ子', 'しかくん', 'テトラ', 'ましかく', 'キューブ', 'がったい', 'つみき', 'レンガ', 'マス目',
   'かどっこ', 'ドット', 'ピクセル', 'ボックス', 'タイル', 'かたまり', 'ずっしり', 'カチカチ', 'ぴったり', 'でかしかく'];
@@ -132,6 +132,7 @@ function pieceWorld(p, q) {
   const [wx, wy] = rotV((q.gx + q.s / 2 - p.cx) * U, (q.gy + q.s / 2 - p.cy) * U, p.rot);
   return { x: p.x + wx, y: p.y + wy, h: q.s * U / 2 };
 }
+function worldPieces(p) { return p.ws || (p.ws = p.pieces.map(q => pieceWorld(p, q))); }
 function toLocal(p, x, y) {
   const [lx, ly] = rotV(x - p.x, y - p.y, -p.rot);
   return [lx / U + p.cx, ly / U + p.cy];
@@ -268,7 +269,7 @@ function newPlayer(name, isPlayer, start) {
   return p;
 }
 function safeSpot() {
-  let bestP = null, gap = -1;
+  let bestP = { x: rand(300, WORLD - 300), y: rand(300, WORLD - 300) }, gap = -Infinity;
   for (let t = 0; t < 40; t++) {
     const x = rand(300, WORLD - 300), y = rand(300, WORLD - 300);
     let g = Infinity;
@@ -357,22 +358,25 @@ function update(dt) {
 
   // bodies touching: the bigger square breaks the smaller one; equal squares bounce
   const alive = players.filter(p => p.alive);
+  for (const p of alive) p.ws = null;
   for (let i = 0; i < alive.length; i++) for (let j = i + 1; j < alive.length; j++) {
     const A = alive[i], B = alive[j];
     if (!A.alive || !B.alive) continue;
     if (Math.hypot(A.x - B.x, A.y - B.y) > A.rad + B.rad) continue;
     let hit = null;
-    for (let a = 0; a < A.pieces.length && !hit; a++) {
-      const wa = pieceWorld(A, A.pieces[a]);
-      for (let b = 0; b < B.pieces.length; b++) {
-        const wb = pieceWorld(B, B.pieces[b]);
+    const WA = worldPieces(A), WB = worldPieces(B);
+    for (let a = 0; a < WA.length && !hit; a++) {
+      const wa = WA[a];
+      if (Math.abs(wa.x - B.x) > B.rad + wa.h || Math.abs(wa.y - B.y) > B.rad + wa.h) continue;
+      for (let b = 0; b < WB.length; b++) {
+        const wb = WB[b];
         if (Math.abs(wa.x - wb.x) < wa.h + wb.h - 2 && Math.abs(wa.y - wb.y) < wa.h + wb.h - 2) { hit = [a, b]; break; }
       }
     }
     if (!hit) continue;
     const sa = A.pieces[hit[0]].s, sb = B.pieces[hit[1]].s;
-    if (sa > sb && B.shield < now) breakPiece(B, hit[1], A);
-    else if (sb > sa && A.shield < now) breakPiece(A, hit[0], B);
+    if (sa > sb && B.shield < now) { breakPiece(B, hit[1], A); B.ws = null; }
+    else if (sb > sa && A.shield < now) { breakPiece(A, hit[0], B); A.ws = null; }
     else {
       const dx = B.x - A.x, dy = B.y - A.y, d = Math.hypot(dx, dy) || 1, push = 6;
       A.x -= dx / d * push; A.y -= dy / d * push; B.x += dx / d * push; B.y += dy / d * push;
@@ -503,7 +507,7 @@ function start() {
   pointer = { x: W / 2, y: H / 2 };
 }
 function gameOver(by) {
-  playing = false; resetBtn.hidden = true;
+  playing = false;
   const secs = Math.round((performance.now() - startT) / 1000);
   const r = document.getElementById('result');
   r.hidden = false;
@@ -519,8 +523,7 @@ try { document.getElementById('nameIn').value = localStorage.getItem('blocks_nam
 let resetArmed = 0;
 resetBtn.addEventListener('pointerdown', e => {
   e.preventDefault(); e.stopPropagation();
-  if (!playing) return;
-  if (performance.now() < resetArmed) {
+  if (performance.now() < resetArmed || !playing) {
     resetArmed = 0; resetBtn.classList.remove('armed'); resetBtn.textContent = '↺ リセット';
     resetWorld(); start(); flash('最初からやり直し！');
     return;
@@ -546,9 +549,15 @@ tapBtn('detachBtn', () => detach(me));
 
 // ---------- Loop ----------
 let last = performance.now();
+let errors = 0;
 function frame(t) {
   const dt = Math.min(0.05, (t - last) / 1000); last = t;
-  update(dt); updateCam(dt); draw(); updateHud(dt);
+  try { update(dt); updateCam(dt); draw(); updateHud(dt); }
+  catch (err) {
+    // never freeze: report once and keep running; the reset button stays usable
+    console.error(err);
+    if (errors++ === 0) flash('エラーが起きました。止まったらリセットしてね');
+  }
   requestAnimationFrame(frame);
 }
 resize();
