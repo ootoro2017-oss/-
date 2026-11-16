@@ -95,6 +95,8 @@ const BOT_NAMES = ['もちもち', 'たこやき', 'ぷにぷに', 'まんまる
 
 const ALLY_NAMES = ['ナイト', 'ガード', 'サポート'];
 const ALLY_MASS = 35, ALLY_FOOD = 1.5, KILL_SHARE = 0.5, AUTO_FEED_S = 5;
+const CARRY_SHARE = 0.85, CARRY_TRIP = 25, CARRY_DROP = 20; // free-roaming friends haul food to the player
+const isCarrier = o => !!o.team && !o.follower && !o.isPlayer;
 const sameTeam = (a, b) => a === b || (a.team && a.team === b.team);
 // the three ★ allies stick with the player; every other bot is a friendly free roamer
 const isFollower = o => !!o.follower;
@@ -225,10 +227,30 @@ function followPoint(leader, big) {
   const gap = radius(leader.m) + radius(big.m) + 120;
   return { x: leader.x + dx / d * gap, y: leader.y + dy / d * gap };
 }
+// hand a parcel of mass to the player; only the player can pick it up
+function giveGift(o, from, to, m) {
+  const a = Math.atan2(to.y - from.y, to.x - from.x) + rand(-0.05, 0.05), r = radius(from.m);
+  // ejects glide about speed/5.5 before stopping, so pick the speed that lands on the player's centre
+  const dist = Math.max(0, Math.hypot(to.x - from.x, to.y - from.y) - r);
+  const v = clamp(dist * 5.5, 200, 2600);
+  ejects.push({ x: from.x + Math.cos(a) * r, y: from.y + Math.sin(a) * r, vx: Math.cos(a) * v, vy: Math.sin(a) * v, m, c: o.color, born: performance.now(), gift: o });
+}
 function botThink(o) {
   const mine = cellsOf(o);
   if (!mine.length) return;
   const big = mine.reduce((a, c) => c.m > a.m ? c : a);
+  if (isCarrier(o)) {
+    const L = me && me.alive ? cellsOf(me).reduce((a, c) => !a || c.m > a.m ? c : a, null) : null;
+    if (L && ((o.carry || 0) >= CARRY_TRIP || (o.delivering && o.carry >= 1))) {
+      // walk over, stop a little short so nobody gets swallowed, and hand the food over
+      o.delivering = true;
+      const dx = big.x - L.x, dy = big.y - L.y, d = Math.hypot(dx, dy) || 1, gap = radius(L.m) + radius(big.m) + 150;
+      o.tx = L.x + dx / d * gap; o.ty = L.y + dy / d * gap; o.far = d > gap + 400;
+      if (d < gap + 60) { const m = Math.min(o.carry, CARRY_DROP); giveGift(o, big, L, m); o.carry -= m; o.think = 0.15; }
+      return;
+    }
+    o.delivering = false; o.far = false;
+  }
   const r = radius(big.m), view = (isFollower(o) ? 700 : 500) + r * (isFollower(o) ? 5 : 4);
   const leader = isFollower(o) && me && me.alive ? cellsOf(me).reduce((a, c) => !a || c.m > a.m ? c : a, null) : null;
   let fx = 0, fy = 0, prey = null, preyScore = 0;
@@ -400,7 +422,9 @@ function update(dt) {
       for (let i = b.length - 1; i >= 0; i--) {
         const f = b[i];
         if ((f.x - c.x) ** 2 + (f.y - c.y) ** 2 < r * r) {
-          c.m += f.m * (isFollower(c.o) ? ALLY_FOOD : 1); b.splice(i, 1);
+          if (isCarrier(c.o)) { c.o.carry = (c.o.carry || 0) + f.m * CARRY_SHARE; c.m += f.m * (1 - CARRY_SHARE); }
+          else c.m += f.m * (isFollower(c.o) ? ALLY_FOOD : 1);
+          b.splice(i, 1);
           f.x = rand(0, WORLD); f.y = rand(0, WORLD); f.c = pick(COLORS); addFood(f);
         }
       }
@@ -425,11 +449,12 @@ function update(dt) {
       }
     }
     if (e.dead) continue;
+    if (e.gift && now - e.born > 15000) e.gift = null; // an uncollected parcel becomes ordinary food
     const young = now - e.born < 250;
     // an ally's gift is only for the player (who can catch it right away); enemies can still steal it
     for (const c of cells) {
       if (e.gift ? (c.o !== me && (c.o.team || young)) : young) continue;
-      if (c.m > EJECT_MASS * 1.1 && Math.hypot(c.x - e.x, c.y - e.y) < radius(c.m)) { c.m += e.m; e.dead = true; if (e.gift && c.o === me) e.gift.given = (e.gift.given || 0) + e.m; break; }
+      if ((e.gift || c.m > EJECT_MASS * 1.1) && Math.hypot(c.x - e.x, c.y - e.y) < radius(c.m)) { c.m += e.m; e.dead = true; if (e.gift && c.o === me) e.gift.given = (e.gift.given || 0) + e.m; break; }
     }
   }
   ejects = ejects.filter(e => !e.dead);
@@ -607,7 +632,8 @@ function updateHud(dt) {
   if (me && me.alive) {
     const m = massOf(me); best = Math.max(best, m);
     document.getElementById('score').textContent = `大きさ ${Math.round(m)}`;
-    document.getElementById('contrib').innerHTML = '<b>味方からもらった量</b>' + owners.filter(isFollower)
+    const hauled = owners.filter(isCarrier).reduce((a, o) => a + (o.given || 0), 0);
+    document.getElementById('contrib').innerHTML = `<b>みんなが運んできた量</b><div>味方${owners.filter(isCarrier).length}体<span>+${Math.round(hauled)}</span></div><b>★からもらった量</b>` + owners.filter(isFollower)
       .map(o => `<div>${esc(o.name)}<span>+${Math.round(o.given || 0)}${o.cleared ? `・トゲ${o.cleared}` : ''}</span></div>`).join('');
   }
 }
