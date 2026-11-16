@@ -70,13 +70,14 @@
 
 <script>
 // ---------- Tuning ----------
-const WORLD = 6000, FOOD_N = 1400, VIRUS_N = 24, BOT_N = 25;
+const WORLD = 6000, FOOD_N = 7000, VIRUS_N = 24, BOT_N = 125;
 const START_MASS = 12, MIN_SPLIT = 35, MAX_CELLS = 16, EJECT_COST = 16, EJECT_MASS = 13;
 const VIRUS_MASS = 100, VIRUS_FEED = 7, EAT_RATIO = 1.25;
 const COLORS = ['#ff5a3c', '#ff9f1c', '#ffd23f', '#3bceac', '#0ead69', '#3a86ff', '#8338ec', '#ff006e', '#00b4d8', '#f15bb5', '#9ef01a', '#fb8500'];
 const BOT_NAMES = ['もちもち', 'たこやき', 'ぷにぷに', 'まんまる', 'うさぎ団', 'ねむねむ', 'ころころ', 'ふわふわ', 'しろくま', 'メロンパン',
   'おにぎり', 'てんとう虫', 'ぴよぴよ', 'ゼリー', 'みかん', 'アメーバ', 'ばくだん', 'とうふ', 'こんぺいとう', 'だんご', 'はらぺこ', 'すいか', 'ラムネ', 'わたあめ', 'くらげ'];
 
+const SHIELD_MS = 3000; // a fresh player can't be eaten for a moment
 const radius = m => Math.sqrt(m) * 6;
 const speedOf = m => 520 * Math.pow(m, -0.33);
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -103,7 +104,7 @@ function resetWorld() {
   grid = Array.from({ length: GN * GN }, () => []);
   food = []; for (let i = 0; i < FOOD_N; i++) food.push(spawnFood());
   for (let i = 0; i < VIRUS_N; i++) viruses.push(newVirus(rand(200, WORLD - 200), rand(200, WORLD - 200)));
-  for (let i = 0; i < BOT_N; i++) spawnOwner(BOT_NAMES[i % BOT_NAMES.length], false, rand(12, 120));
+  for (let i = 0; i < BOT_N; i++) spawnOwner(BOT_NAMES[i % BOT_NAMES.length] + (i >= BOT_NAMES.length ? Math.floor(i / BOT_NAMES.length) + 1 : ''), false, rand(12, 120));
 }
 function newVirus(x, y) { return { x, y, m: VIRUS_MASS, vx: 0, vy: 0, fed: 0 }; }
 function spawnOwner(name, isPlayer, mass = START_MASS) {
@@ -114,12 +115,17 @@ function spawnOwner(name, isPlayer, mass = START_MASS) {
   o.tx = p.x; o.ty = p.y;
   return o;
 }
+// pick the candidate spot farthest from any bigger danger
 function safeSpot() {
-  for (let t = 0; t < 30; t++) {
+  let best = null, bestGap = -Infinity;
+  for (let t = 0; t < 60; t++) {
     const x = rand(300, WORLD - 300), y = rand(300, WORLD - 300);
-    if (!cells.some(c => Math.hypot(c.x - x, c.y - y) < radius(c.m) + 250)) return { x, y };
+    let gap = Infinity;
+    for (const c of cells) gap = Math.min(gap, Math.hypot(c.x - x, c.y - y) - radius(c.m) * 3);
+    if (gap > bestGap) { bestGap = gap; best = { x, y }; }
+    if (gap > 600) break;
   }
-  return { x: rand(300, WORLD - 300), y: rand(300, WORLD - 300) };
+  return best;
 }
 function newCell(o, x, y, m) { return { id: nextId++, o, x, y, m, vx: 0, vy: 0, mergeAt: 0 }; }
 const cellsOf = o => cells.filter(c => c.o === o);
@@ -310,7 +316,7 @@ function update(dt) {
     const ra = radius(a.m);
     for (let j = i + 1; j < cells.length; j++) {
       const b = cells[j];
-      if (b.dead || b.o === a.o || a.m < b.m * EAT_RATIO) continue;
+      if (b.dead || b.o === a.o || a.m < b.m * EAT_RATIO || b.o.shield > now) continue;
       const dx = b.x - a.x, dy = b.y - a.y;
       if (Math.abs(dx) > ra || Math.abs(dy) > ra) continue;
       if (Math.hypot(dx, dy) < ra - radius(b.m) * 0.4) { a.m += b.m; b.dead = true; }
@@ -391,6 +397,11 @@ function drawCell(c) {
   ctx.fillStyle = c.o.color; ctx.strokeStyle = shade(c.o.color);
   ctx.lineWidth = Math.max(3, r * 0.06);
   ctx.beginPath(); ctx.arc(c.x, c.y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  const left = (c.o.shield || 0) - performance.now();
+  if (left > 0 && Math.floor(left / 150) % 2 === 0) {
+    ctx.strokeStyle = 'rgba(58,134,255,.85)'; ctx.lineWidth = Math.max(4, r * 0.12);
+    ctx.beginPath(); ctx.arc(c.x, c.y, r + ctx.lineWidth * 1.2, 0, Math.PI * 2); ctx.stroke();
+  }
   if (r * cam.z > 10) {
     const fs = Math.max(10, r * 0.38);
     ctx.font = `800 ${fs}px Rubik, "Hiragino Sans", sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -451,6 +462,7 @@ function start() {
   try { localStorage.setItem('cells_name', name); } catch (e) {}
   owners = owners.filter(o => !o.isPlayer);
   me = spawnOwner(name, true);
+  me.shield = performance.now() + SHIELD_MS;
   best = START_MASS; startT = performance.now(); playing = true;
   menu.hidden = true;
   pointer = { x: W / 2, y: H / 2 };
