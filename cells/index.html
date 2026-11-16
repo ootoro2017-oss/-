@@ -31,6 +31,7 @@
   #board ol { margin: 0; padding-left: 20px; }
   #board li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.45; }
   #board li.me { color: var(--accent); font-weight: 800; }
+  #board li.ally { color: #0ead69; font-weight: 800; }
   #mini { left: max(12px, env(safe-area-inset-left, 0px)); bottom: calc(12px + env(safe-area-inset-bottom, 0px));
     width: 110px; height: 110px; background: var(--panel); border-radius: 10px; }
   .btns { position: fixed; right: max(14px, env(safe-area-inset-right, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px));
@@ -39,6 +40,10 @@
     color: #fff; box-shadow: 0 4px 0 rgba(0,0,0,.18); opacity: .88; }
   #splitBtn { background: var(--accent); }
   #ejectBtn { background: #3a86ff; }
+  #feedBtn { background: #0ead69; line-height: 1.15; }
+  #flash { left: 50%; top: calc(56px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); background: rgba(29,39,51,.85); color: #fff;
+    padding: 6px 14px; border-radius: 99px; font-size: 13px; opacity: 0; transition: opacity .25s; white-space: nowrap; }
+  @media (max-width: 400px) { .btns button { width: 64px; height: 64px; font-size: 13px; } .btns { gap: 8px; } }
   .btns button:active { transform: translateY(2px); box-shadow: 0 2px 0 rgba(0,0,0,.18); }
   #menu { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px; z-index: 5; background: rgba(242,245,248,.55); }
   #menu[hidden] { display: none; }
@@ -59,13 +64,14 @@
 <div id="score" class="hud"></div>
 <div id="board" class="hud"><h4>ランキング</h4><ol id="rank"></ol></div>
 <canvas id="mini" class="hud"></canvas>
-<div class="btns"><button id="ejectBtn" aria-label="質量を発射">発射</button><button id="splitBtn" aria-label="分裂">分裂</button></div>
+<div id="flash" class="hud"></div>
+<div class="btns"><button id="feedBtn" aria-label="味方に質量をもらう">ちょう<br>だい</button><button id="ejectBtn" aria-label="質量を発射">発射</button><button id="splitBtn" aria-label="分裂">分裂</button></div>
 <div id="menu"><div class="card">
   <h1>ぱくぱくセル</h1>
   <div id="result" class="result" hidden></div>
   <input id="nameIn" maxlength="12" placeholder="なまえ" aria-label="なまえ">
   <button id="playBtn">あそぶ</button>
-  <p>指（マウス）の方向に進む。自分より小さいセルを食べて大きくなろう。<br>分裂：スペース／発射：W</p>
+  <p>指（マウス）の方向に進む。自分より小さいセルを食べて大きくなろう。<br>分裂：スペース／発射：W／味方にもらう：E<br>★の付いた3体は味方。食べ合わず、一緒に戦ってくれる。</p>
 </div></div>
 
 <script>
@@ -77,6 +83,8 @@ const COLORS = ['#ff5a3c', '#ff9f1c', '#ffd23f', '#3bceac', '#0ead69', '#3a86ff'
 const BOT_NAMES = ['もちもち', 'たこやき', 'ぷにぷに', 'まんまる', 'うさぎ団', 'ねむねむ', 'ころころ', 'ふわふわ', 'しろくま', 'メロンパン',
   'おにぎり', 'てんとう虫', 'ぴよぴよ', 'ゼリー', 'みかん', 'アメーバ', 'ばくだん', 'とうふ', 'こんぺいとう', 'だんご', 'はらぺこ', 'すいか', 'ラムネ', 'わたあめ', 'くらげ'];
 
+const ALLY_NAMES = ['ナイト', 'ガード', 'サポート'];
+const sameTeam = (a, b) => a === b || (a.team && a.team === b.team);
 const SHIELD_MS = 3000; // a fresh player can't be eaten for a moment
 const radius = m => Math.sqrt(m) * 6;
 const speedOf = m => 520 * Math.pow(m, -0.33);
@@ -153,7 +161,8 @@ function eject(o) {
     const a = Math.atan2(o.ty - c.y, o.tx - c.x) + rand(-0.1, 0.1);
     c.m -= EJECT_COST;
     const r = radius(c.m);
-    ejects.push({ x: c.x + Math.cos(a) * r, y: c.y + Math.sin(a) * r, vx: Math.cos(a) * 900, vy: Math.sin(a) * 900, m: EJECT_MASS, c: o.color, born: performance.now() });
+    const v = o.team && o !== me ? 1700 : 900; // gifts fly farther so a moving player can catch them
+    ejects.push({ x: c.x + Math.cos(a) * r, y: c.y + Math.sin(a) * r, vx: Math.cos(a) * v, vy: Math.sin(a) * v, m: EJECT_MASS, c: o.color, born: performance.now(), gift: !!(o.team && o !== me) });
   }
 }
 // a cell that eats a virus bursts into many small pieces
@@ -173,17 +182,33 @@ function burst(c) {
   }
 }
 
+// allies shoot some of their mass toward the player
+// allies come over and shoot some of their mass at the player
+function askFeed() {
+  let n = 0;
+  for (const o of owners) {
+    if (!o.team || o === me || !o.alive || massOf(o) < 60) continue;
+    o.feed = 3; o.think = 0; n++;
+  }
+  flash(n ? `味方 ${n}体 が分けに来てくれるよ！` : '味方がまだ小さくて分けられない…');
+}
+let flashT = 0;
+function flash(t) { const el = document.getElementById('flash'); el.textContent = t; el.style.opacity = 1; clearTimeout(flashT); flashT = setTimeout(() => el.style.opacity = 0, 1400); }
+
 // ---------- Bots ----------
 function botThink(o) {
   const mine = cellsOf(o);
   if (!mine.length) return;
   const big = mine.reduce((a, c) => c.m > a.m ? c : a);
   const r = radius(big.m), view = 500 + r * 4;
+  const leader = o.team && me && me.alive ? cellsOf(me).reduce((a, c) => !a || c.m > a.m ? c : a, null) : null;
   let fx = 0, fy = 0, prey = null, preyScore = 0;
   for (const c of cells) {
-    if (c.o === o) continue;
+    if (sameTeam(c.o, o)) continue;
     const dx = c.x - big.x, dy = c.y - big.y, d = Math.hypot(dx, dy);
     if (d > view) continue;
+    // allies only hunt around the player
+    if (o.team && leader && c.m < big.m && Math.hypot(c.x - leader.x, c.y - leader.y) > 900) continue;
     if (c.m > big.m * EAT_RATIO) {
       const w = (c.m / big.m) * 600 / Math.max(40, d - radius(c.m));
       fx -= dx / d * w; fy -= dy / d * w;
@@ -192,16 +217,34 @@ function botThink(o) {
       if (s > preyScore) { preyScore = s; prey = c; }
     }
   }
+  // allies drift back toward the player, and run that way when chased
+  if (leader) {
+    const dx = leader.x - big.x, dy = leader.y - big.y, d = Math.hypot(dx, dy) || 1;
+    if (d > 450 + radius(leader.m) && Math.hypot(fx, fy) > 0.6) { fx += dx / d * 1.5; fy += dy / d * 1.5; }
+  }
   if (big.m > VIRUS_MASS * 1.3) for (const v of viruses) {
     const dx = v.x - big.x, dy = v.y - big.y, d = Math.hypot(dx, dy);
     if (d < r + 160) { fx -= dx / d * 2; fy -= dy / d * 2; }
   }
   let tx, ty;
-  if (Math.hypot(fx, fy) > 0.6) { tx = big.x + fx * 300; ty = big.y + fy * 300; }
+  if (o.feed > 0 && leader && Math.hypot(fx, fy) < 4) {
+    o.tx = leader.x; o.ty = leader.y;
+    if (Math.hypot(leader.x - big.x, leader.y - big.y) < radius(leader.m) + r + 260) { eject(o); o.feed--; o.think = 0.12; }
+    else o.far = true;
+    return;
+  }
+  // an ally far from the player heads straight back unless something big is right on it
+  const far = leader && Math.hypot(leader.x - big.x, leader.y - big.y) > 700 + radius(leader.m);
+  o.far = !!far;
+  if (Math.hypot(fx, fy) > (far ? 4 : 0.6)) { tx = big.x + fx * 300; ty = big.y + fy * 300; }
+  else if (far) { tx = leader.x; ty = leader.y; }
   else if (prey) {
     tx = prey.x; ty = prey.y;
     const d = Math.hypot(prey.x - big.x, prey.y - big.y);
     if (big.m / 2 > prey.m * EAT_RATIO && d < 320 + r && mine.length < 4 && Math.random() < 0.3) { o.tx = tx; o.ty = ty; split(o); }
+  } else if (leader && Math.hypot(leader.x - big.x, leader.y - big.y) > 450 + radius(leader.m)) {
+    // too far from the player: catch up
+    tx = leader.x + rand(-150, 150); ty = leader.y + rand(-150, 150);
   } else {
     // drift toward the densest nearby food
     let bestF = null, bd = Infinity;
@@ -229,7 +272,7 @@ function update(dt) {
   for (const c of cells) {
     const o = c.o, r = radius(c.m);
     const dx = o.tx - c.x, dy = o.ty - c.y, d = Math.hypot(dx, dy) || 1;
-    const sp = speedOf(c.m) * Math.min(1, d / (r + 30));
+    const sp = speedOf(c.m) * Math.min(1, d / (r + 30)) * (o.feed > 0 ? 2 : o.far ? 1.6 : 1);
     c.x += (dx / d * sp + c.vx) * dt; c.y += (dy / d * sp + c.vy) * dt;
     const damp = Math.pow(0.02, dt); c.vx *= damp; c.vy *= damp;
     c.x = clamp(c.x, r * 0.5, WORLD - r * 0.5); c.y = clamp(c.y, r * 0.5, WORLD - r * 0.5);
@@ -288,8 +331,13 @@ function update(dt) {
         }
       }
     }
-    if (e.dead || now - e.born < 250) continue;
-    for (const c of cells) if (c.m > EJECT_MASS * 1.1 && Math.hypot(c.x - e.x, c.y - e.y) < radius(c.m)) { c.m += e.m; e.dead = true; break; }
+    if (e.dead) continue;
+    const young = now - e.born < 250;
+    // an ally's gift is only for the player (who can catch it right away); enemies can still steal it
+    for (const c of cells) {
+      if (e.gift ? (c.o.team && c.o !== me) || (young && c.o !== me) : young) continue;
+      if (c.m > EJECT_MASS * 1.1 && Math.hypot(c.x - e.x, c.y - e.y) < radius(c.m)) { c.m += e.m; e.dead = true; break; }
+    }
   }
   ejects = ejects.filter(e => !e.dead);
   for (const v of viruses) {
@@ -316,7 +364,7 @@ function update(dt) {
     const ra = radius(a.m);
     for (let j = i + 1; j < cells.length; j++) {
       const b = cells[j];
-      if (b.dead || b.o === a.o || a.m < b.m * EAT_RATIO || b.o.shield > now) continue;
+      if (b.dead || b.o === a.o || a.m < b.m * EAT_RATIO || b.o.shield > now || sameTeam(a.o, b.o)) continue;
       const dx = b.x - a.x, dy = b.y - a.y;
       if (Math.abs(dx) > ra || Math.abs(dy) > ra) continue;
       if (Math.hypot(dx, dy) < ra - radius(b.m) * 0.4) { a.m += b.m; b.dead = true; }
@@ -334,7 +382,10 @@ function update(dt) {
     } else o.peak = Math.max(o.peak, m);
   }
   for (const o of owners) if (!o.isPlayer && !o.alive && now - o.diedAt > 3000) {
-    o.alive = true; o.peak = START_MASS; o.color = pick(COLORS);
+    if (o.team && !(me && me.alive)) continue;
+    o.alive = true; o.peak = START_MASS;
+    if (o.team) { const c = cellsOf(me)[0]; cells.push(newCell(o, c.x + rand(-200, 200), c.y + rand(-200, 200), START_MASS)); o.shield = now + SHIELD_MS; continue; }
+    o.color = pick(COLORS);
     const p = safeSpot(); cells.push(newCell(o, p.x, p.y, rand(12, 40)));
   }
   owners = owners.filter(o => o.alive || !o.isPlayer || o === me);
@@ -431,7 +482,7 @@ function drawMini() {
   mctx.strokeStyle = '#dde4ec'; mctx.lineWidth = 1;
   for (let i = 1; i < 5; i++) { mctx.beginPath(); mctx.moveTo(i * 22, 0); mctx.lineTo(i * 22, 110); mctx.moveTo(0, i * 22); mctx.lineTo(110, i * 22); mctx.stroke(); }
   for (const c of cells) {
-    if (c.o !== me && c.m < 200) continue;
+    if (c.o !== me && !c.o.team && c.m < 200) continue;
     mctx.fillStyle = c.o.color; mctx.beginPath(); mctx.arc(c.x * s, c.y * s, Math.max(1.5, radius(c.m) * s), 0, Math.PI * 2); mctx.fill();
   }
   if (me && me.alive) { mctx.strokeStyle = '#1d2733'; mctx.lineWidth = 1.5; mctx.beginPath(); mctx.arc(cam.x * s, cam.y * s, 5, 0, Math.PI * 2); mctx.stroke(); }
@@ -445,7 +496,7 @@ function updateHud(dt) {
   const alive = owners.filter(o => o.alive).map(o => ({ o, m: massOf(o) })).sort((a, b) => b.m - a.m);
   const top = alive.slice(0, 10);
   const esc = s => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-  let html = top.map(x => `<li class="${x.o === me ? 'me' : ''}">${esc(x.o.name)}</li>`).join('');
+  let html = top.map(x => `<li class="${x.o === me ? 'me' : x.o.team ? 'ally' : ''}">${esc(x.o.name)}</li>`).join('');
   const myRank = alive.findIndex(x => x.o === me);
   if (myRank >= 10) html += `<li class="me" value="${myRank + 1}">${esc(me.name)}</li>`;
   document.getElementById('rank').innerHTML = html;
@@ -460,9 +511,17 @@ const menu = document.getElementById('menu');
 function start() {
   const name = document.getElementById('nameIn').value.trim() || 'あなた';
   try { localStorage.setItem('cells_name', name); } catch (e) {}
-  owners = owners.filter(o => !o.isPlayer);
+  cells = cells.filter(c => !c.o.isPlayer && !c.o.team);
+  owners = owners.filter(o => !o.isPlayer && !o.team);
   me = spawnOwner(name, true);
+  me.team = 'me';
   me.shield = performance.now() + SHIELD_MS;
+  const home = cellsOf(me)[0];
+  for (const n of ALLY_NAMES) {
+    const a = { id: nextId++, name: '★' + n, color: me.color, isPlayer: false, team: 'me', alive: true, tx: home.x, ty: home.y, think: 0, peak: START_MASS, shield: me.shield };
+    owners.push(a);
+    cells.push(newCell(a, home.x + rand(-160, 160), home.y + rand(-160, 160), START_MASS));
+  }
   best = START_MASS; startT = performance.now(); playing = true;
   menu.hidden = true;
   pointer = { x: W / 2, y: H / 2 };
@@ -487,9 +546,10 @@ addEventListener('keydown', e => {
   if (!playing || e.target.tagName === 'INPUT') return;
   if (e.code === 'Space') { e.preventDefault(); split(me); }
   if (e.code === 'KeyW') eject(me);
+  if (e.code === 'KeyE') askFeed();
 });
 const tapBtn = (id, fn) => document.getElementById(id).addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); if (playing) fn(me); });
-tapBtn('splitBtn', split); tapBtn('ejectBtn', eject);
+tapBtn('splitBtn', split); tapBtn('ejectBtn', eject); tapBtn('feedBtn', askFeed);
 
 // ---------- Loop ----------
 let last = performance.now();
