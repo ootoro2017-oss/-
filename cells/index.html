@@ -23,6 +23,10 @@
   #cv { position: fixed; inset: 0; display: block; }
   #mini { display: block; }
   .hud { position: fixed; pointer-events: none; z-index: 2; }
+  #resetBtn { position: fixed; z-index: 3; top: calc(48px + env(safe-area-inset-top, 0px)); left: max(12px, env(safe-area-inset-left, 0px));
+    border: 0; border-radius: 10px; padding: 6px 12px; font: inherit; font-weight: 800; font-size: 13px; background: var(--panel); color: var(--ink); cursor: pointer; }
+  #resetBtn.armed { background: var(--accent); color: #fff; }
+  #resetBtn:focus-visible { outline: 3px solid #3a86ff; outline-offset: 2px; }
   #score { top: calc(10px + env(safe-area-inset-top, 0px)); left: max(12px, env(safe-area-inset-left, 0px));
     background: var(--panel); border-radius: 10px; padding: 6px 12px; font-weight: 800; font-size: 15px; font-variant-numeric: tabular-nums; }
   #board { top: calc(10px + env(safe-area-inset-top, 0px)); right: max(12px, env(safe-area-inset-right, 0px));
@@ -62,6 +66,7 @@
 <body>
 <canvas id="cv"></canvas>
 <div id="score" class="hud"></div>
+<button id="resetBtn" hidden>↺ リセット</button>
 <div id="board" class="hud"><h4>ランキング</h4><ol id="rank"></ol></div>
 <canvas id="mini" class="hud"></canvas>
 <div id="flash" class="hud"></div>
@@ -531,9 +536,11 @@ function start() {
   }
   best = START_MASS; startT = performance.now(); playing = true;
   menu.hidden = true;
+  document.getElementById('resetBtn').hidden = false;
   pointer = { x: W / 2, y: H / 2 };
 }
 function gameOver() {
+  document.getElementById('resetBtn').hidden = true;
   playing = false;
   const secs = Math.round((performance.now() - startT) / 1000);
   const r = document.getElementById('result');
@@ -556,6 +563,21 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyE') askFeed();
 });
 const tapBtn = (id, fn) => document.getElementById(id).addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); if (playing) fn(me); });
+// reset needs a second tap within 2s so a stray touch doesn't wipe the round
+const resetBtn = document.getElementById('resetBtn');
+let resetArmed = 0;
+resetBtn.addEventListener('pointerdown', e => {
+  e.preventDefault(); e.stopPropagation();
+  if (!playing) return;
+  if (performance.now() < resetArmed) {
+    resetArmed = 0; resetBtn.classList.remove('armed'); resetBtn.textContent = '↺ リセット';
+    resetWorld(); start(); flash('最初からやり直し！');
+    return;
+  }
+  resetArmed = performance.now() + 2000;
+  resetBtn.classList.add('armed'); resetBtn.textContent = 'もう一度押すとリセット';
+  setTimeout(() => { if (performance.now() >= resetArmed) { resetBtn.classList.remove('armed'); resetBtn.textContent = '↺ リセット'; } }, 2050);
+});
 tapBtn('splitBtn', split); tapBtn('ejectBtn', eject); tapBtn('feedBtn', askFeed);
 
 // ---------- Loop ----------
