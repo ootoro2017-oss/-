@@ -71,7 +71,7 @@
   <div id="result" class="result" hidden></div>
   <input id="nameIn" maxlength="12" placeholder="なまえ" aria-label="なまえ">
   <button id="playBtn">あそぶ</button>
-  <p>指（マウス）の方向に進む。自分より小さいセルを食べて大きくなろう。<br>分裂：スペース／発射：W／味方にもらう：E<br>★の付いた3体は味方。食べ合わず、一緒に戦ってくれる。</p>
+  <p>指（マウス）の方向に進む。自分より小さいセルを食べて大きくなろう。<br>分裂：スペース／発射：W／味方にもらう：E<br>★の付いた3体は味方。一緒に戦ってくれるけど、大きさしだいでお互い食べられる。</p>
 </div></div>
 
 <script>
@@ -196,6 +196,13 @@ let flashT = 0;
 function flash(t) { const el = document.getElementById('flash'); el.textContent = t; el.style.opacity = 1; clearTimeout(flashT); flashT = setTimeout(() => el.style.opacity = 0, 1400); }
 
 // ---------- Bots ----------
+// where an ally heads to stay with the player: a big ally keeps a gap so it doesn't swallow the player by accident
+function followPoint(leader, big) {
+  if (big.m < leader.m * 1.1) return { x: leader.x, y: leader.y };
+  const dx = big.x - leader.x, dy = big.y - leader.y, d = Math.hypot(dx, dy) || 1;
+  const gap = radius(leader.m) + radius(big.m) + 120;
+  return { x: leader.x + dx / d * gap, y: leader.y + dy / d * gap };
+}
 function botThink(o) {
   const mine = cellsOf(o);
   if (!mine.length) return;
@@ -228,7 +235,7 @@ function botThink(o) {
   }
   let tx, ty;
   if (o.feed > 0 && leader && Math.hypot(fx, fy) < 4) {
-    o.tx = leader.x; o.ty = leader.y;
+    const fp = followPoint(leader, big); o.tx = fp.x; o.ty = fp.y;
     if (Math.hypot(leader.x - big.x, leader.y - big.y) < radius(leader.m) + r + 260) { eject(o); o.feed--; o.think = 0.12; }
     else o.far = true;
     return;
@@ -237,14 +244,14 @@ function botThink(o) {
   const far = leader && Math.hypot(leader.x - big.x, leader.y - big.y) > 700 + radius(leader.m);
   o.far = !!far;
   if (Math.hypot(fx, fy) > (far ? 4 : 0.6)) { tx = big.x + fx * 300; ty = big.y + fy * 300; }
-  else if (far) { tx = leader.x; ty = leader.y; }
+  else if (far) { const fp = followPoint(leader, big); tx = fp.x; ty = fp.y; }
   else if (prey) {
     tx = prey.x; ty = prey.y;
     const d = Math.hypot(prey.x - big.x, prey.y - big.y);
     if (big.m / 2 > prey.m * EAT_RATIO && d < 320 + r && mine.length < 4 && Math.random() < 0.3) { o.tx = tx; o.ty = ty; split(o); }
   } else if (leader && Math.hypot(leader.x - big.x, leader.y - big.y) > 450 + radius(leader.m)) {
     // too far from the player: catch up
-    tx = leader.x + rand(-150, 150); ty = leader.y + rand(-150, 150);
+    const fp = followPoint(leader, big); tx = fp.x + rand(-150, 150); ty = fp.y + rand(-150, 150);
   } else {
     // drift toward the densest nearby food
     let bestF = null, bd = Infinity;
@@ -364,7 +371,7 @@ function update(dt) {
     const ra = radius(a.m);
     for (let j = i + 1; j < cells.length; j++) {
       const b = cells[j];
-      if (b.dead || b.o === a.o || a.m < b.m * EAT_RATIO || b.o.shield > now || sameTeam(a.o, b.o)) continue;
+      if (b.dead || b.o === a.o || a.m < b.m * EAT_RATIO || b.o.shield > now || (sameTeam(a.o, b.o) && a.o !== me && b.o !== me)) continue;
       const dx = b.x - a.x, dy = b.y - a.y;
       if (Math.abs(dx) > ra || Math.abs(dy) > ra) continue;
       if (Math.hypot(dx, dy) < ra - radius(b.m) * 0.4) { a.m += b.m; b.dead = true; }
