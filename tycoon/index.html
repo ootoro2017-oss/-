@@ -1,0 +1,678 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ナイトシティ・タイクーン</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@700;800&family=Zen+Kaku+Gothic+New:wght@400;700;900&display=swap">
+<style>
+  /* Layout: one-screen app. Living skyline on top with the fortune counter, scrolling tab content below, tab bar at the bottom.
+     Night-city look with gold and neon on purpose; single dark theme. */
+  :root {
+    --bg: #070b18;
+    --card: #11182c;
+    --card2: #18213a;
+    --line: #26314f;
+    --text: #eef2ff;
+    --muted: #8d98b8;
+    --gold: #f5c451;
+    --gold2: #ffe39a;
+    --neon: #49e2ff;
+    --pink: #ff4fae;
+    --good: #5be39b;
+    --bad: #ff6b6b;
+    --display: "Shippori Mincho B1", "Hiragino Mincho ProN", "Yu Mincho", serif;
+    --body: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--body); font-size: 14px; display: flex; flex-direction: column; overflow: hidden; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  button:focus-visible { outline: 2px solid var(--neon); outline-offset: 2px; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* skyline header */
+  #sky { position: relative; height: 36vh; min-height: 220px; max-height: 340px; flex-shrink: 0; overflow: hidden; }
+  #city { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .wealth { position: absolute; left: 0; right: 0; top: 0; padding: calc(10px + env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px));
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; pointer-events: none; }
+  .wealth .label { font-size: 11px; letter-spacing: .2em; color: var(--gold2); opacity: .8; }
+  #money { font-family: var(--display); font-weight: 800; font-size: clamp(24px, 7vw, 38px); white-space: nowrap; line-height: 1.1; color: var(--gold);
+    text-shadow: 0 0 18px rgba(245,196,81,.45), 0 2px 0 #6b4c06; }
+  #rate { font-size: 13px; color: var(--neon); font-weight: 700; }
+  .side { text-align: right; display: grid; gap: 4px; justify-items: end; }
+  .pill { background: rgba(7,11,24,.7); border: 1px solid var(--line); border-radius: 99px; padding: 3px 10px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+  .pill.gem { color: #b9f3ff; }
+  .pill.buff { color: var(--pink); border-color: rgba(255,79,174,.5); }
+  #eventBell { position: absolute; right: max(16px, env(safe-area-inset-right, 0px)); bottom: 12px; pointer-events: auto; border: 0; border-radius: 99px;
+    padding: 8px 14px; background: var(--pink); color: #fff; font-weight: 900; box-shadow: 0 0 18px var(--pink); animation: bell 1.2s infinite; }
+  @keyframes bell { 50% { transform: scale(1.06); } }
+
+  main { flex: 1; overflow-y: auto; padding: 12px max(16px, env(safe-area-inset-right, 0px)) 18px max(16px, env(safe-area-inset-left, 0px));
+    display: grid; gap: 10px; align-content: start; grid-auto-rows: max-content; background: linear-gradient(180deg, #0a1022, var(--bg) 120px); }
+  .bar { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+  .bar h2 { margin: 0; font-family: var(--display); font-size: 18px; color: var(--gold2); }
+  .seg { display: flex; background: var(--card); border: 1px solid var(--line); border-radius: 99px; padding: 3px; }
+  .seg button { border: 0; background: none; padding: 5px 11px; border-radius: 99px; font-weight: 700; font-size: 12px; color: var(--muted); }
+  .seg button.on { background: var(--gold); color: #2a1d00; }
+  .note { color: var(--muted); font-size: 12px; line-height: 1.6; margin: 0; }
+  .syn { background: linear-gradient(90deg, rgba(73,226,255,.12), rgba(255,79,174,.12)); border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; font-size: 12px; line-height: 1.6; }
+  .syn b { color: var(--neon); }
+
+  .item { display: grid; grid-template-columns: 44px 1fr auto; gap: 10px; align-items: center; background: var(--card); border: 1px solid var(--line);
+    border-radius: 14px; padding: 10px; position: relative; overflow: hidden; }
+  .item.locked { opacity: .45; }
+  .item .ic { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; font-size: 24px; background: var(--card2); }
+  .item .info { min-width: 0; display: grid; gap: 2px; }
+  .item .name { font-weight: 900; display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+  .item .name em { font-style: normal; color: var(--gold); font-family: var(--display); font-size: 15px; }
+  .item small { color: var(--muted); font-size: 11px; }
+  .item .prog { position: absolute; left: 0; bottom: 0; height: 3px; background: linear-gradient(90deg, var(--gold), var(--pink)); }
+  .buy { border: 0; border-radius: 12px; padding: 8px 10px; min-width: 92px; background: linear-gradient(180deg, var(--gold2), var(--gold)); color: #2a1d00;
+    font-weight: 900; font-size: 12px; line-height: 1.25; box-shadow: 0 3px 0 #8a6510; }
+  .buy small { display: block; font-weight: 700; color: #5a4300; font-size: 10px; }
+  .buy:disabled { background: var(--card2); color: var(--muted); box-shadow: none; cursor: default; }
+  .buy:disabled small { color: var(--muted); }
+  .buy.alt { background: linear-gradient(180deg, #8ff0ff, var(--neon)); box-shadow: 0 3px 0 #127a8f; color: #00242c; }
+
+  .toggle { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--card); border: 1px solid var(--gold);
+    border-radius: 14px; padding: 10px 12px; }
+  .switch { width: 52px; height: 30px; border-radius: 99px; border: 0; background: var(--card2); position: relative; flex-shrink: 0; }
+  .switch::after { content: ""; position: absolute; top: 4px; left: 4px; width: 22px; height: 22px; border-radius: 50%; background: var(--muted); transition: transform .2s, background .2s; }
+  .switch.on { background: rgba(91,227,155,.3); }
+  .switch.on::after { transform: translateX(22px); background: var(--good); }
+
+  .staff { display: grid; grid-template-columns: 52px 1fr auto; gap: 10px; align-items: center; background: var(--card); border-radius: 14px; padding: 10px; border: 1px solid var(--line); }
+  .avatar { width: 52px; height: 52px; border-radius: 14px; display: grid; place-items: center; font-size: 26px; position: relative; }
+  .rar { font-family: var(--display); font-weight: 800; font-size: 12px; }
+  .r-N { --rc: #9aa6c2; } .r-R { --rc: #4aa3ff; } .r-SR { --rc: #c26bff; } .r-SSR { --rc: #f5c451; } .r-UR { --rc: #ff4fae; }
+  .staff .avatar, .card-r .avatar { background: radial-gradient(circle at 30% 25%, color-mix(in srgb, var(--rc) 55%, transparent), var(--card2) 70%); box-shadow: inset 0 0 0 2px var(--rc); }
+  .staff .rar { color: var(--rc); }
+  .gacha { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .gacha .buy { padding: 12px 8px; font-size: 14px; }
+  .rates { display: flex; gap: 6px; flex-wrap: wrap; font-size: 11px; }
+  .rates span { padding: 2px 8px; border-radius: 99px; background: var(--card2); color: var(--rc); font-weight: 700; }
+
+  .prestige { background: radial-gradient(circle at 50% 0%, rgba(245,196,81,.25), var(--card) 70%); border: 1px solid var(--gold); border-radius: 18px; padding: 18px; text-align: center; display: grid; gap: 10px; }
+  .prestige .big { font-family: var(--display); font-size: 34px; color: var(--gold); }
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; min-width: 0; }
+  .stat small { display: block; color: var(--muted); font-size: 11px; }
+  .stat b { font-variant-numeric: tabular-nums; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  nav { display: grid; grid-template-columns: repeat(5, 1fr); background: #0c1224; border-top: 1px solid var(--line);
+    padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); flex-shrink: 0; }
+  nav button { background: none; border: 0; padding: 9px 0 10px; font-size: 11px; font-weight: 700; color: var(--muted); display: grid; justify-items: center; gap: 2px; position: relative; }
+  nav button i { font-style: normal; font-size: 20px; line-height: 1; }
+  nav button.on { color: var(--gold); }
+  nav button .dot { position: absolute; top: 6px; right: calc(50% - 18px); width: 8px; height: 8px; border-radius: 50%; background: var(--pink); }
+
+  .modal { position: fixed; inset: 0; background: rgba(3,5,12,.78); display: grid; place-items: center; padding: 16px; z-index: 10; }
+  .modal[hidden] { display: none; }
+  .sheet { width: 100%; max-width: 380px; background: linear-gradient(180deg, var(--card2), var(--card)); border: 1px solid var(--gold); border-radius: 20px;
+    padding: 20px 18px; display: grid; gap: 12px; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,.6), 0 0 40px rgba(245,196,81,.15); }
+  .sheet h3 { margin: 0; font-family: var(--display); font-size: 22px; color: var(--gold); }
+  .sheet p { margin: 0; line-height: 1.7; color: var(--text); }
+  .choices { display: grid; gap: 8px; }
+  .choice { border: 1px solid var(--line); background: var(--card); border-radius: 14px; padding: 12px; text-align: left; display: grid; gap: 2px; }
+  .choice b { color: var(--gold2); }
+  .choice small { color: var(--muted); font-size: 12px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; }
+  .card-r { background: var(--card2); border-radius: 14px; padding: 10px 6px; display: grid; justify-items: center; gap: 4px; border: 1px solid var(--rc);
+    animation: pop .5s both; box-shadow: 0 0 18px color-mix(in srgb, var(--rc) 40%, transparent); }
+  .card-r .rar { color: var(--rc); font-size: 16px; }
+  .card-r small { font-size: 11px; color: var(--muted); }
+  @keyframes pop { from { transform: scale(.6) rotateY(90deg); opacity: 0; } to { transform: none; opacity: 1; } }
+  #toast { position: fixed; left: 50%; top: calc(36vh - 40px); transform: translateX(-50%); background: rgba(7,11,24,.9); border: 1px solid var(--gold);
+    color: var(--gold2); padding: 7px 14px; border-radius: 99px; font-size: 13px; font-weight: 700; z-index: 11; opacity: 0; transition: opacity .25s; pointer-events: none; white-space: nowrap; max-width: 92vw; overflow: hidden; text-overflow: ellipsis; }
+  @media (prefers-reduced-motion: reduce) { #eventBell, .card-r { animation: none; } }
+</style>
+</head>
+<body>
+<header id="sky">
+  <canvas id="city"></canvas>
+  <div class="wealth">
+    <div>
+      <div class="label">総資産</div>
+      <div id="money" class="num">¥0</div>
+      <div id="rate" class="num"></div>
+    </div>
+    <div class="side">
+      <span class="pill gem num" id="gems"></span>
+      <span class="pill num" id="legacyPill"></span>
+      <span id="buffs"></span>
+    </div>
+  </div>
+  <button id="eventBell" hidden>📩 イベント</button>
+</header>
+<main id="main"></main>
+<nav id="tabs"></nav>
+<div class="modal" id="modal" hidden><div class="sheet" id="sheet"></div></div>
+<div id="toast"></div>
+
+<script>
+// ---------- Content ----------
+// base cost and income per second at level 1; each extra unit costs 15% more
+const RE = [
+  { id: 'park',   icon: '🅿️', name: '月極駐車場',     cost: 15,     inc: 0.5,    h: 14, w: 26, office: 0 },
+  { id: 'apt',    icon: '🏠', name: '木造アパート',   cost: 120,    inc: 3,      h: 26, w: 22, office: 0 },
+  { id: 'mansion',icon: '🏢', name: 'マンション',     cost: 1500,   inc: 25,     h: 48, w: 24, office: 0 },
+  { id: 'office', icon: '🏬', name: 'オフィスビル',   cost: 2e4,    inc: 180,    h: 70, w: 26, office: 5 },
+  { id: 'mall',   icon: '🛍️', name: '商業施設',       cost: 3e5,    inc: 1400,   h: 44, w: 54, office: 0 },
+  { id: 'tower',  icon: '🌃', name: 'タワーマンション', cost: 4.5e6, inc: 1.1e4,  h: 120, w: 24, office: 0 },
+  { id: 'sky',    icon: '🏙️', name: '超高層ビル',     cost: 7e7,    inc: 9e4,    h: 160, w: 30, office: 30 },
+  { id: 'resort', icon: '🏝️', name: 'リゾートホテル', cost: 1.2e9,  inc: 7.5e5,  h: 80, w: 60, office: 0 },
+  { id: 'smart',  icon: '🌐', name: 'スマートシティ', cost: 2.5e10, inc: 7e6,    h: 190, w: 40, office: 100 },
+  { id: 'sea',    icon: '🌊', name: '海上都市',       cost: 6e11,   inc: 7e7,    h: 150, w: 80, office: 300 },
+  { id: 'elev',   icon: '🛗', name: '軌道エレベーター', cost: 3e13,  inc: 8e8,    h: 230, w: 18, office: 800 },
+  { id: 'moon',   icon: '🌕', name: '月面都市',       cost: 2e15,   inc: 7e9,    h: 140, w: 90, office: 2000 },
+  { id: 'mars',   icon: '🪐', name: '火星コロニー',   cost: 1.5e17, inc: 6e10,   h: 170, w: 100, office: 6000 },
+];
+const CO = [
+  { id: 'odd',    icon: '🧰', name: '便利屋',         cost: 50,     inc: 1.5,   sign: 'HELP' },
+  { id: 'web',    icon: '💻', name: 'Web制作',        cost: 600,    inc: 12,    sign: 'WEB' },
+  { id: 'app',    icon: '📱', name: 'アプリ開発',     cost: 8000,   inc: 100,   sign: 'APP' },
+  { id: 'ad',     icon: '📣', name: '広告代理店',     cost: 1e5,    inc: 800,   sign: 'AD' },
+  { id: 'game',   icon: '🎮', name: 'ゲーム会社',     cost: 1.5e6,  inc: 7000,  sign: 'GAME' },
+  { id: 'logi',   icon: '🚚', name: '物流ネットワーク', cost: 2.2e7, inc: 5.5e4, sign: 'LOGI' },
+  { id: 'bank',   icon: '🏦', name: 'ネット銀行',     cost: 4e8,    inc: 4.5e5, sign: 'BANK' },
+  { id: 'ai',     icon: '🤖', name: 'AI研究所',       cost: 7e9,    inc: 4e6,   sign: 'AI' },
+  { id: 'space',  icon: '🚀', name: '宇宙開発',       cost: 1.5e11, inc: 4e7,   sign: 'SPACE' },
+  { id: 'quant',  icon: '🧮', name: '量子コンピュータ', cost: 4e12, inc: 4e8,  sign: 'QBIT' },
+  { id: 'fusion', icon: '⚛️', name: '核融合エネルギー', cost: 1.2e14, inc: 4e9, sign: 'FUSION' },
+  { id: 'planet', icon: '🌍', name: '惑星開発',       cost: 4e15,   inc: 4e10,  sign: 'PLANET' },
+];
+const GROWTH = 1.17;
+const MILESTONES = [25, 50, 100, 200, 300, 400, 500, 750, 1000];
+const GLOBAL_UPG = [
+  { id: 'auto',   icon: '🤖', name: '自動投資AI',         cost: 5000,  desc: '物件と事業を自動で買ってくれる（オン/オフ可）' },
+  { id: 'g1',     icon: '📈', name: '経営コンサル契約',    cost: 1e6,   desc: 'すべての収入 ×1.5', mult: 1.5 },
+  { id: 'syn',    icon: '🔗', name: '自社ビル戦略',        cost: 1e8,   desc: '不動産と会社のシナジー効果が2倍' },
+  { id: 'off1',   icon: '🌙', name: '24時間管理人',        cost: 5e6,   desc: '留守中の稼ぎ 50% → 100%' },
+  { id: 'offcap', icon: '⏳', name: '留守番延長',          cost: 1e10,   desc: '留守中に稼げる時間 8時間 → 24時間' },
+  { id: 'pr',     icon: '📰', name: '広報部の設立',        cost: 5e7,   desc: 'イベントが起きやすくなり、いい結果が増える' },
+  { id: 'hr',     icon: '🤝', name: '人事部の設立',        cost: 3e8,   desc: 'ガチャに必要なダイヤ 30 → 20' },
+  { id: 'g2',     icon: '🗞️', name: '経済誌の表紙を飾る',  cost: 1e12,  desc: 'すべての収入 ×2', mult: 2 },
+  { id: 'g3',     icon: '🏛️', name: 'ホールディングス化',  cost: 1e18,  desc: 'すべての収入 ×3', mult: 3 },
+  { id: 'g4',     icon: '🌍', name: '世界進出',            cost: 1e24,  desc: 'すべての収入 ×5', mult: 5 },
+];
+const RARITY = [
+  { r: 'N',   p: 0.50, bonus: 0.03, color: '#9aa6c2' },
+  { r: 'R',   p: 0.30, bonus: 0.08, color: '#4aa3ff' },
+  { r: 'SR',  p: 0.14, bonus: 0.20, color: '#c26bff' },
+  { r: 'SSR', p: 0.05, bonus: 0.60, color: '#f5c451' },
+  { r: 'UR',  p: 0.01, bonus: 1.50, color: '#ff4fae' },
+];
+const LAST = ['佐藤', '鈴木', '高橋', '田中', '伊藤', '渡辺', '山本', '中村', '小林', '加藤', '吉田', '山田', '松本', '井上', '木村', '林', '清水', '森', '池田', '橋本'];
+const FIRST = ['蓮', '陽翔', '湊', '樹', '大和', '悠真', '結衣', '陽菜', '凛', '美咲', '葵', '紬', '健太', '翔太', '彩', '真央', '拓海', '花', '颯', '芽依'];
+const ROLES = {
+  re:  [['🏗️', '建築士'], ['🔑', '不動産営業'], ['📐', '都市計画家'], ['🧹', '管理人']],
+  co:  [['💼', '敏腕営業'], ['🧑‍💻', 'エンジニア'], ['📊', 'アナリスト'], ['🎨', 'デザイナー']],
+  all: [['👔', '名経営者'], ['🧠', '天才投資家'], ['🎤', 'カリスマ広報']],
+};
+const fmtUnits = ['', '万', '億', '兆', '京', '垓', '秭', '穣', '溝', '澗', '正', '載', '極', '恒河沙', '阿僧祇', '那由他', '不可思議', '無量大数'];
+function fmt(n) {
+  if (!isFinite(n)) return '∞';
+  const neg = n < 0; n = Math.abs(n);
+  let s;
+  if (n < 1e4) s = n < 100 && n % 1 ? n.toFixed(1) : Math.floor(n).toLocaleString('ja-JP');
+  else {
+    const k = Math.min(fmtUnits.length - 1, Math.floor(Math.log10(n) / 4));
+    if (k === fmtUnits.length - 1 && n >= 1e72) s = n.toExponential(2);
+    else { const v = n / Math.pow(10, k * 4); s = (v >= 1000 ? Math.floor(v).toLocaleString('ja-JP') : v >= 100 ? v.toFixed(1) : v.toFixed(2)) + fmtUnits[k]; }
+  }
+  return (neg ? '−' : '') + s;
+}
+const yen = n => '¥' + fmt(n);
+const rand = (a, b) => a + Math.random() * (b - a);
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+// ---------- State ----------
+const SAVE_KEY = 'nightcity_tycoon_v1';
+let S;
+function fresh(keep = {}) {
+  return {
+    money: 30, earned: 0, lifetime: keep.lifetime || 0, gems: keep.gems ?? 30, legacy: keep.legacy || 0, gen: keep.gen || 1,
+    re: Object.fromEntries(RE.map(x => [x.id, x.id === 'park' ? 1 : 0])), co: Object.fromEntries(CO.map(x => [x.id, 0])),
+    upg: {}, staff: keep.staff || [], buffs: [], auto: false, lastSave: Date.now(), nextEvent: Date.now() + 90000, pending: null, born: Date.now(),
+  };
+}
+function load() { try { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); if (s && s.re) return Object.assign(fresh(), s); } catch (e) {} return null; }
+function save() { S.lastSave = Date.now(); try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) {} }
+
+// ---------- Economy ----------
+const msMult = n => Math.pow(2, MILESTONES.filter(m => n >= m).length);
+const officeFloors = () => RE.reduce((a, x) => a + S.re[x.id] * x.office, 0);
+const companyLevels = () => CO.reduce((a, x) => a + S.co[x.id], 0);
+function staffBonus(sector) {
+  let b = 0;
+  for (const s of S.staff) { const r = RARITY.find(x => x.r === s.rar); const v = r.bonus * (1 + (s.lvl - 1) * 0.5); if (s.sector === sector) b += v; else if (s.sector === 'all') b += v * 0.5; }
+  return 1 + b;
+}
+function buffMult(kind) { let m = 1; const now = Date.now(); for (const b of S.buffs) if (b.until > now && (b.kind === 'all' || b.kind === kind)) m *= b.mult; return m; }
+function synergy() {
+  const k = S.upg.syn ? 2 : 1;
+  return { co: 1 + Math.log2(1 + officeFloors()) * 0.12 * k, re: 1 + Math.log2(1 + companyLevels()) * 0.08 * k };
+}
+function globalMult() { let m = 1 + S.legacy * 0.1; for (const u of GLOBAL_UPG) if (u.mult && S.upg[u.id]) m *= u.mult; return m; }
+function itemUpgMult(id) { return (S.upg['i1_' + id] ? 2 : 1) * (S.upg['i2_' + id] ? 3 : 1) * (S.upg['i3_' + id] ? 5 : 1); }
+function itemIncome(kind, x) {
+  const n = S[kind][x.id]; if (!n) return 0;
+  return x.inc * n * msMult(n) * itemUpgMult(x.id);
+}
+function incomes() {
+  const syn = synergy(), g = globalMult();
+  const re = RE.reduce((a, x) => a + itemIncome('re', x), 0) * syn.re * staffBonus('re') * buffMult('re') * g;
+  const co = CO.reduce((a, x) => a + itemIncome('co', x), 0) * syn.co * staffBonus('co') * buffMult('co') * g;
+  return { re, co, total: re + co };
+}
+const costOf = (x, n, k = 1) => x.cost * Math.pow(GROWTH, n) * (Math.pow(GROWTH, k) - 1) / (GROWTH - 1);
+function maxAfford(x, n) { const k = Math.floor(Math.log(S.money * (GROWTH - 1) / (x.cost * Math.pow(GROWTH, n)) + 1) / Math.log(GROWTH)); return Math.max(0, k); }
+function earn(v) { S.money += v; S.earned += v; S.lifetime += v; }
+function buy(kind, x, k) {
+  const n = S[kind][x.id];
+  if (k === 'max') k = maxAfford(x, n);
+  if (k < 1) return false;
+  const c = costOf(x, n, k);
+  if (c > S.money) return false;
+  S.money -= c; S[kind][x.id] = n + k;
+  const before = MILESTONES.filter(m => n >= m).length, after = MILESTONES.filter(m => n + k >= m).length;
+  if (after > before) { S.gems += 5 * (after - before); toast(`${x.name} ${n + k}件達成！ 収入×2・💎+${5 * (after - before)}`); }
+  bumpCity();
+  return true;
+}
+// one-time upgrades: three per item (unlocked by owning 10 / 50 / 150) plus the global list
+function itemUpgrades() {
+  const out = [];
+  for (const [kind, list] of [['re', RE], ['co', CO]]) for (const x of list) {
+    const n = S[kind][x.id];
+    [[1, 10, 1e3, 2, kind === 're' ? 'リノベーション' : '業務効率化'], [2, 50, 1e6, 3, kind === 're' ? 'ブランド化' : '大型契約'], [3, 150, 1e12, 5, kind === 're' ? 'ランドマーク化' : '業界トップ']]
+      .forEach(([t, need, cm, mult, label]) => out.push({ id: `i${t}_${x.id}`, icon: x.icon, name: `${x.name}：${label}`, cost: x.cost * cm, desc: `${x.name}の収入 ×${mult}`, need, have: n }));
+  }
+  return out;
+}
+
+// ---------- Staff gacha ----------
+const gachaGems = () => S.upg.hr ? 20 : 30;
+const gachaYen = () => Math.max(3000, incomes().total * 300);
+function rollStaff() {
+  let r = Math.random(), rar = RARITY[0];
+  for (const x of RARITY) { if (r < x.p) { rar = x; break; } r -= x.p; }
+  const sector = Math.random() < 0.15 ? 'all' : Math.random() < 0.5 ? 're' : 'co';
+  const [face, role] = pick(ROLES[sector]);
+  return { id: Date.now() + Math.random(), name: pick(LAST) + ' ' + pick(FIRST), rar: rar.r, sector, face, role, lvl: 1 };
+}
+function pull(times, payWith, silent) {
+  const costG = gachaGems() * times, costY = gachaYen() * times;
+  if (payWith === 'gem') { if (S.gems < costG) return toast('ダイヤが足りません'); S.gems -= costG; }
+  else { if (S.money < costY) return toast('お金が足りません'); S.money -= costY; }
+  const got = [];
+  for (let i = 0; i < times; i++) {
+    const s = rollStaff();
+    // same name, rarity and role: the existing one levels up instead
+    const dup = S.staff.find(x => x.rar === s.rar && x.role === s.role && x.sector === s.sector);
+    if (dup && Math.random() < 0.35) { dup.lvl = Math.min(10, dup.lvl + 1); got.push({ ...dup, dup: true }); }
+    else { S.staff.push(s); got.push(s); }
+  }
+  S.staff.sort((a, b) => RARITY.findIndex(r => r.r === b.rar) - RARITY.findIndex(r => r.r === a.rar) || b.lvl - a.lvl);
+  if (silent) return got;
+  showModal(`<h3>採用結果</h3><div class="cards">${got.map((s, i) => `<div class="card-r r-${s.rar}" style="animation-delay:${i * 0.08}s"><div class="avatar">${s.face}</div><span class="rar">${s.rar}</span><b style="font-size:12px">${esc(s.name)}</b><small>${s.dup ? 'レベルアップ！' : s.role}</small></div>`).join('')}</div>
+    <button class="buy" data-close>閉じる</button>`);
+  save(); render();
+}
+const trainCost = s => Math.max(500, incomes().total * 60) * Math.pow(1.8, s.lvl - 1) * (RARITY.findIndex(r => r.r === s.rar) + 1);
+
+// ---------- Events ----------
+const EVENTS = [
+  { t: '📺 テレビ取材の依頼', d: '経済番組から「話題の若手経営者」として取材の申し込みが来た。',
+    a: ['受ける', '大きく宣伝できるかも。でも炎上のリスクも…', () => Math.random() < (S.upg.pr ? 0.85 : 0.7) ? buff('all', 2, 10, '取材効果 ×2') : buff('all', 0.7, 5, '炎上中 ×0.7')],
+    b: ['断る', 'ダイヤ +5', () => gem(5)] },
+  { t: '💰 大口の投資話', d: '知人から「確実に倍になる」という投資話を持ちかけられた。手元資金の30%が必要だ。',
+    a: ['乗る', '当たれば2.5倍、外れたら全損', () => { const v = S.money * 0.3; S.money -= v; if (Math.random() < (S.upg.pr ? 0.7 : 0.55)) { earn(v * 2.5); return `大成功！ ${yen(v * 2.5)} が戻ってきた`; } return `だまされた… ${yen(v)} を失った`; }],
+    b: ['見送る', 'ダイヤ +2', () => gem(2)] },
+  { t: '📱 人気インフルエンサーとコラボ', d: 'フォロワー300万人のインフルエンサーがコラボを提案してきた。',
+    a: ['依頼する', '収入5分ぶんの費用で、15分間 収入×1.8', () => pay(300) ? buff('all', 1.8, 15, 'コラボ効果 ×1.8') : 'お金が足りなかった'],
+    b: ['断る', '何も起きない', () => '今回は見送った'] },
+  { t: '🔧 古い物件の修繕', d: '持っている物件の一部で設備が古くなってきた。',
+    a: ['修繕する', '収入3分ぶんの費用で、30分間 不動産×1.3', () => pay(200) ? buff('re', 1.3, 30, '修繕済み 不動産×1.3') : 'お金が足りなかった'],
+    b: ['後回し', '10分間 不動産×0.85', () => buff('re', 0.85, 10, '設備トラブル 不動産×0.85')] },
+  { t: '🕴️ ヘッドハンティング', d: 'ライバル企業のエースが「御社で働きたい」と連絡してきた。',
+    a: ['迎え入れる', '無料で社員ガチャ1回', () => { S.gems += gachaGems(); const [s] = pull(1, 'gem', true); return `<span class="r-${s.rar}" style="color:var(--rc);font-weight:900">${s.rar}</span> ${esc(s.name)}（${s.role}）が${s.dup ? 'レベルアップした' : '仲間になった'}！`; }],
+    b: ['断る', 'ダイヤ +8', () => gem(8)] },
+  { t: '📊 地価高騰のうわさ', d: '再開発で近くの地価が上がるといううわさを聞いた。手元資金の20%で土地を買い増せる。',
+    a: ['買い増す', '20分間 不動産×1.6', () => { S.money *= 0.8; return buff('re', 1.6, 20, '地価高騰 不動産×1.6'); }],
+    b: ['様子見', 'ダイヤ +3', () => gem(3)] },
+  { t: '🏖️ 社員旅行の提案', d: '社員から「たまには社員旅行に行きたい」という声が上がっている。',
+    a: ['行く', '収入2分ぶんの費用で、15分間 会社×1.5・ダイヤ+3', () => { if (!pay(120)) return 'お金が足りなかった'; S.gems += 3; return buff('co', 1.5, 15, 'やる気MAX 会社×1.5'); }],
+    b: ['行かない', '5分間 会社×0.9', () => buff('co', 0.9, 5, 'ちょっと不満 会社×0.9')] },
+  { t: '🧾 税務調査の連絡', d: '税務署から調査の連絡が入った。',
+    a: ['自分で対応', '収入1分ぶんを支払う', () => { pay(60, true); return '指摘を受けて少し追徴された'; }],
+    b: ['顧問税理士に頼む', 'ダイヤ10を使って何事もなく終わる', () => { if (S.gems < 10) { pay(60, true); return 'ダイヤが足りず、結局追徴された'; } S.gems -= 10; return '完璧に対応してもらえた'; }] },
+  { t: '🎫 宝くじ売り場の前', d: 'ふと宝くじ売り場の前を通りかかった。',
+    a: ['買ってみる', '¥3,000。当たれば収入1時間ぶん', () => { if (S.money < 3000) return 'お金が足りなかった'; S.money -= 3000; if (Math.random() < 0.05) { const v = Math.max(1e6, incomes().total * 3600); earn(v); return `大当たり！ ${yen(v)}！`; } return 'はずれ…'; }],
+    b: ['通り過ぎる', '何も起きない', () => '堅実にいこう'] },
+];
+function buff(kind, mult, min, label) { S.buffs.push({ kind, mult, until: Date.now() + min * 60000, label }); return `${label}（${min}分間）`; }
+function gem(n) { S.gems += n; return `ダイヤ +${n}`; }
+function pay(seconds, force) { const v = incomes().total * seconds; if (!force && S.money < v) return false; S.money = Math.max(0, S.money - v); return true; }
+function scheduleEvent() { S.nextEvent = Date.now() + (S.upg.pr ? rand(60, 150) : rand(120, 240)) * 1000; }
+function openEvent() {
+  const e = EVENTS[S.pending];
+  showModal(`<h3>${e.t}</h3><p>${e.d}</p><div class="choices">
+    <button class="choice" data-ev="a"><b>${e.a[0]}</b><small>${e.a[1]}</small></button>
+    <button class="choice" data-ev="b"><b>${e.b[0]}</b><small>${e.b[1]}</small></button></div>`);
+}
+function answerEvent(which) {
+  const e = EVENTS[S.pending]; S.pending = null; scheduleEvent();
+  const msg = e[which][2]();
+  showModal(`<h3>${e.t}</h3><p>${msg}</p><button class="buy" data-close>OK</button>`);
+  save(); render();
+}
+
+// ---------- Prestige ----------
+const PRESTIGE_BASE = 1e10;
+const prestigeGain = () => Math.floor(Math.cbrt(S.earned / PRESTIGE_BASE));
+function retire() {
+  const g = prestigeGain(); if (g < 1) return;
+  const keep = { lifetime: S.lifetime, gems: S.gems + 20, legacy: S.legacy + g, staff: S.staff, gen: S.gen + 1 };
+  S = fresh(keep); S.lastSave = Date.now(); save(); city.key = ''; tab = 're'; render();
+  showModal(`<h3>${S.gen}代目 就任！</h3><p>先代の遺産で、すべての収入が永久に <b style="color:var(--gold)">×${(1 + S.legacy * 0.1).toFixed(1)}</b><br>社員とダイヤはそのまま引き継いだ（ダイヤ +20）</p><button class="buy" data-close>はじめる</button>`);
+}
+
+// ---------- Auto invest ----------
+// buys whatever pays itself back fastest, keeping a little cash on hand
+function autoInvest() {
+  if (!S.upg.auto || !S.auto) return;
+  for (let tries = 0; tries < 5; tries++) {
+    let best = null, bestScore = Infinity;
+    for (const [kind, list] of [['re', RE], ['co', CO]]) list.forEach((x, i) => {
+      if (!unlocked(kind, i)) return;
+      const n = S[kind][x.id], c = costOf(x, n);
+      if (c > S.money * 0.9) return;
+      const gain = x.inc * msMult(n + 1) * itemUpgMult(x.id) * (n + 1) - (n ? itemIncome(kind, x) : 0);
+      const score = c / Math.max(gain, 1e-9);
+      if (score < bestScore) { bestScore = score; best = [kind, x]; }
+    });
+    if (!best) break;
+    buy(best[0], best[1], 1);
+  }
+  for (const u of GLOBAL_UPG.concat(itemUpgrades())) if (!S.upg[u.id] && (u.need === undefined || u.have >= u.need) && u.cost < S.money * 0.25) { S.upg[u.id] = true; S.money -= u.cost; }
+}
+const unlocked = (kind, i) => i === 0 || S[kind][(kind === 're' ? RE : CO)[i - 1].id] > 0;
+
+// ---------- City canvas ----------
+const cv = document.getElementById('city'), ctx = cv.getContext('2d');
+let CW = 0, CH = 0, DPR = 1;
+const city = { key: '', bld: [], back: [], cars: [], pops: [] };
+function seeded(seed) { let s = seed >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296); }
+function resizeCity() {
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  const r = cv.getBoundingClientRect(); CW = r.width; CH = r.height;
+  cv.width = CW * DPR; cv.height = CH * DPR; city.key = '';
+}
+addEventListener('resize', resizeCity);
+function bumpCity() { city.key = ''; }
+function buildCity() {
+  const key = RE.map(x => S.re[x.id]).join(',') + '|' + CO.map(x => S.co[x.id] ? 1 : 0).join('') + '|' + CW;
+  if (key === city.key) return;
+  city.key = key;
+  const rnd = seeded(7);
+  city.back = [];
+  for (let x = -10; x < CW + 10; x += 14 + rnd() * 18) city.back.push({ x, w: 14 + rnd() * 26, h: 20 + rnd() * 70 });
+  const list = [];
+  RE.forEach((t, ti) => {
+    const n = S.re[t.id], vis = n ? Math.min(14, Math.ceil(Math.log2(n + 1) * 1.6)) : 0;
+    const r = seeded(ti * 97 + 13);
+    for (let i = 0; i < vis; i++) list.push({ t, ti, x: r() * (CW - t.w * 0.6) - t.w * 0.2, w: t.w * (0.85 + r() * 0.3), h: t.h * (0.8 + r() * 0.4) * (CH / 260), seed: (ti * 131 + i * 17) >>> 0 });
+  });
+  list.sort((a, b) => b.h - a.h);
+  // company signs go on the tallest buildings
+  const owned = CO.filter(c => S.co[c.id]);
+  owned.forEach((c, i) => { if (list[i]) list[i].sign = c.sign; });
+  city.bld = list;
+}
+const roadY = () => CH - 18;
+function drawCity(t) {
+  buildCity();
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const g = ctx.createLinearGradient(0, 0, 0, CH);
+  g.addColorStop(0, '#050816'); g.addColorStop(0.6, '#141a3d'); g.addColorStop(1, '#2a1a3d');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, CW, CH);
+  // stars and moon
+  const sr = seeded(3);
+  for (let i = 0; i < 60; i++) { const x = sr() * CW, y = sr() * CH * 0.5, tw = 0.4 + 0.6 * Math.abs(Math.sin(t * 0.8 + i)); ctx.fillStyle = `rgba(255,255,255,${0.15 + 0.35 * tw})`; ctx.fillRect(x, y, 1.5, 1.5); }
+  ctx.fillStyle = 'rgba(255,236,190,.9)'; ctx.beginPath(); ctx.arc(CW * 0.82, CH * 0.22, 16, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(255,236,190,.08)'; ctx.beginPath(); ctx.arc(CW * 0.82, CH * 0.22, 42, 0, Math.PI * 2); ctx.fill();
+  // distant skyline
+  ctx.fillStyle = '#10142c';
+  for (const b of city.back) ctx.fillRect(b.x, roadY() - b.h, b.w, b.h);
+  // owned buildings
+  const base = roadY();
+  for (const b of city.bld) {
+    const x = b.x, y = base - b.h, w = b.w, h = b.h;
+    const bg = ctx.createLinearGradient(x, 0, x + w, 0);
+    bg.addColorStop(0, '#1c2448'); bg.addColorStop(1, '#0f1430');
+    ctx.fillStyle = bg; ctx.fillRect(x, y, w, h);
+    if (b.t.id === 'tower' || b.t.id === 'sky' || b.t.id === 'smart') { ctx.fillStyle = '#ff4f6b'; ctx.fillRect(x + w / 2 - 1, y - 8, 2, 8); if (Math.sin(t * 3 + b.seed) > 0) { ctx.beginPath(); ctx.arc(x + w / 2, y - 9, 2, 0, Math.PI * 2); ctx.fill(); } }
+    // windows: a slow flicker so the city feels alive
+    const r = seeded(b.seed), cell = 5;
+    for (let wy = y + 4; wy < base - 4; wy += cell + 2) for (let wx = x + 3; wx < x + w - 4; wx += cell + 1) {
+      const v = r(), on = v < 0.55 + 0.1 * Math.sin(t * 0.4 + v * 40);
+      if (!on) continue;
+      ctx.fillStyle = v < 0.08 ? 'rgba(73,226,255,.85)' : v < 0.14 ? 'rgba(255,79,174,.7)' : 'rgba(255,214,130,.75)';
+      ctx.fillRect(wx, wy, cell - 1, cell - 1);
+    }
+    if (b.sign) {
+      const fs = 9, tw = b.sign.length * 6 + 8, sx = x + w / 2 - tw / 2, sy = y + 6;
+      ctx.shadowColor = '#49e2ff'; ctx.shadowBlur = 10 + 4 * Math.sin(t * 4 + b.seed);
+      ctx.strokeStyle = '#49e2ff'; ctx.lineWidth = 1.5; ctx.strokeRect(sx, sy, tw, fs + 6);
+      ctx.fillStyle = '#bff6ff'; ctx.font = `800 ${fs}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(b.sign, x + w / 2, sy + (fs + 6) / 2 + 0.5);
+      ctx.shadowBlur = 0;
+    }
+  }
+  // road and traffic light trails
+  ctx.fillStyle = '#0b0e1f'; ctx.fillRect(0, base, CW, CH - base);
+  ctx.fillStyle = 'rgba(255,214,130,.25)'; for (let x = (t * 30) % 24 - 24; x < CW; x += 24) ctx.fillRect(x, base + 8, 12, 1.5);
+  const carCount = 3 + Math.min(10, Math.floor(Math.log10(incomes().total + 1) * 1.5));
+  for (let i = 0; i < carCount; i++) {
+    const dir = i % 2 ? 1 : -1, speed = 40 + (i * 37) % 60, x = ((t * speed * dir + i * 97) % (CW + 60) + CW + 60) % (CW + 60) - 30, y = base + (dir > 0 ? 5 : 12);
+    const grad = ctx.createLinearGradient(x, 0, x - dir * 26, 0);
+    grad.addColorStop(0, dir > 0 ? 'rgba(255,240,200,.95)' : 'rgba(255,80,90,.95)'); grad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = grad; ctx.fillRect(Math.min(x, x - dir * 26), y, 26, 2);
+  }
+  // floating income
+  for (const p of city.pops) { p.y -= 18 * p.dt; p.a -= 0.5 * p.dt; }
+  city.pops = city.pops.filter(p => p.a > 0);
+  ctx.font = '700 12px "Zen Kaku Gothic New", sans-serif'; ctx.textAlign = 'center';
+  for (const p of city.pops) { ctx.fillStyle = `rgba(245,196,81,${p.a})`; ctx.fillText(p.s, p.x, p.y); }
+}
+
+// ---------- UI ----------
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const TABS = [['re', '🏙️', '不動産'], ['co', '🏢', '会社'], ['staff', '👥', '社員'], ['upg', '⚡', '強化'], ['legacy', '👑', '引退']];
+let tab = 're', qty = 1;
+let toastT;
+function toast(m) { const el = $('toast'); el.textContent = m; el.style.opacity = 1; clearTimeout(toastT); toastT = setTimeout(() => el.style.opacity = 0, 1800); }
+function showModal(html) { $('sheet').innerHTML = html; $('modal').hidden = false; }
+$('modal').addEventListener('click', e => {
+  if (e.target.closest('[data-close]')) $('modal').hidden = true;
+  const ev = e.target.closest('[data-ev]'); if (ev) answerEvent(ev.dataset.ev);
+  if (e.target.closest('[data-retire]')) { $('modal').hidden = true; retire(); }
+});
+$('eventBell').onclick = () => { if (S.pending !== null) openEvent(); };
+
+function renderTabs() {
+  const canUpg = GLOBAL_UPG.concat(itemUpgrades()).some(u => !S.upg[u.id] && (u.need === undefined || u.have >= u.need) && u.cost <= S.money);
+  $('tabs').innerHTML = TABS.map(([id, ic, l]) => `<button data-tab="${id}" class="${tab === id ? 'on' : ''}"><i>${ic}</i>${l}${id === 'upg' && canUpg ? '<span class="dot"></span>' : ''}${id === 'legacy' && prestigeGain() > 0 ? '<span class="dot"></span>' : ''}</button>`).join('');
+}
+$('tabs').onclick = e => { const b = e.target.closest('button'); if (!b) return; tab = b.dataset.tab; render(); $('main').scrollTop = 0; };
+
+function qtySeg() { return `<div class="seg">${[1, 10, 'max'].map(q => `<button data-qty="${q}" class="${qty === q ? 'on' : ''}">${q === 'max' ? 'MAX' : '×' + q}</button>`).join('')}</div>`; }
+function itemRows(kind, list) {
+  const inc = incomes(), share = kind === 're' ? inc.re : inc.co;
+  const raw = list.reduce((a, x) => a + itemIncome(kind, x), 0) || 1;
+  return list.map((x, i) => {
+    const n = S[kind][x.id], open = unlocked(kind, i);
+    const k = qty === 'max' ? Math.max(1, maxAfford(x, n)) : qty;
+    const c = costOf(x, n, k), next = MILESTONES.find(m => m > n), prev = [...MILESTONES].reverse().find(m => m <= n) || 0;
+    const per = n ? itemIncome(kind, x) / raw * share : 0;
+    if (!open) return `<div class="item locked"><div class="ic">🔒</div><div class="info"><div class="name">？？？</div><small>${list[i - 1].name}を1つ持つと解放</small></div><div></div></div>`;
+    return `<div class="item"><div class="ic">${x.icon}</div><div class="info"><div class="name">${x.name}<em class="num">${n}</em></div>
+      <small class="num">${n ? `毎秒 ${yen(per)}` : `1つで毎秒 ${yen(x.inc)}〜`}${next ? `・あと${next - n}で収入×2` : ''}</small></div>
+      <button class="buy" data-buy="${kind}:${x.id}" ${c > S.money || k < 1 ? 'disabled' : ''}>${qty === 'max' ? `MAX ×${k}` : `×${k} 購入`}<small class="num">${yen(c)}</small></button>
+      ${next ? `<div class="prog" style="width:${((n - prev) / (next - prev) * 100).toFixed(1)}%"></div>` : ''}</div>`;
+  }).join('');
+}
+function autoRow() {
+  if (!S.upg.auto) return '';
+  return `<div class="toggle"><div><b>🤖 自動投資AI</b><p class="note">オンにすると、いちばん効率のいい物件・事業・強化を自動で買い続けます。</p></div><button class="switch ${S.auto ? 'on' : ''}" data-auto aria-label="自動投資"></button></div>`;
+}
+function viewRE() {
+  const syn = synergy();
+  return `${autoRow()}<div class="bar"><h2>不動産</h2>${qtySeg()}</div>
+    <div class="syn">🔗 シナジー：会社が<b>${companyLevels()}</b>部署あるので家賃収入 <b>×${syn.re.toFixed(2)}</b>。オフィス系の物件を増やすと会社の稼ぎも上がる。</div>
+    ${itemRows('re', RE)}`;
+}
+function viewCO() {
+  const syn = synergy();
+  return `${autoRow()}<div class="bar"><h2>会社</h2>${qtySeg()}</div>
+    <div class="syn">🔗 シナジー：自社ビルのオフィスが<b>${fmt(officeFloors())}</b>フロアあるので会社の収入 <b>×${syn.co.toFixed(2)}</b>。会社を増やすと家賃収入も上がる。</div>
+    ${itemRows('co', CO)}`;
+}
+function viewStaff() {
+  const ry = gachaYen(), rg = gachaGems();
+  const list = S.staff.map((s, i) => {
+    const r = RARITY.find(x => x.r === s.rar), v = r.bonus * (1 + (s.lvl - 1) * 0.5) * (s.sector === 'all' ? 0.5 : 1);
+    const where = s.sector === 're' ? '不動産' : s.sector === 'co' ? '会社' : '全部門';
+    const tc = trainCost(s);
+    return `<div class="staff r-${s.rar}"><div class="avatar">${s.face}</div><div class="info" style="min-width:0"><div><span class="rar">${s.rar}</span> <b>${esc(s.name)}</b></div>
+      <small class="note">${s.role}・Lv${s.lvl}・${where} +${Math.round(v * 100)}%</small></div>
+      <button class="buy" data-train="${i}" ${s.lvl >= 10 || tc > S.money ? 'disabled' : ''}>${s.lvl >= 10 ? '最大' : '育てる'}<small class="num">${s.lvl >= 10 ? 'Lv10' : yen(tc)}</small></button></div>`;
+  }).join('');
+  return `<div class="bar"><h2>社員</h2><span class="note num">${S.staff.length}人・不動産 ×${staffBonus('re').toFixed(2)}・会社 ×${staffBonus('co').toFixed(2)}</span></div>
+    <div class="gacha">
+      <button class="buy alt" data-pull="1:gem" ${S.gems < rg ? 'disabled' : ''}>💎 採用 1回<small>ダイヤ ${rg}</small></button>
+      <button class="buy alt" data-pull="10:gem" ${S.gems < rg * 10 ? 'disabled' : ''}>💎 採用 10回<small>ダイヤ ${rg * 10}</small></button>
+      <button class="buy" data-pull="1:yen" ${S.money < ry ? 'disabled' : ''}>求人広告 1回<small class="num">${yen(ry)}</small></button>
+      <button class="buy" data-pull="10:yen" ${S.money < ry * 10 ? 'disabled' : ''}>求人広告 10回<small class="num">${yen(ry * 10)}</small></button>
+    </div>
+    <div class="rates">${RARITY.map(r => `<span class="r-${r.r}">${r.r} ${Math.round(r.p * 100)}%・+${Math.round(r.bonus * 100)}%</span>`).join('')}</div>
+    <p class="note">ダイヤはイベント・物件の節目・留守番・引退でもらえます。同じ役職のかぶりはレベルアップすることがあります。</p>
+    ${list || '<p class="note">まだ社員がいません。まずは1人採用してみよう。</p>'}`;
+}
+function viewUpg() {
+  const all = GLOBAL_UPG.map(u => ({ ...u })).concat(itemUpgrades());
+  const avail = all.filter(u => !S.upg[u.id] && (u.need === undefined || u.have >= u.need)).sort((a, b) => a.cost - b.cost);
+  const soon = all.filter(u => !S.upg[u.id] && u.need !== undefined && u.have < u.need && u.have > 0).sort((a, b) => (a.need - a.have) - (b.need - b.have)).slice(0, 4);
+  const done = all.filter(u => S.upg[u.id]).length;
+  const row = (u, lock) => `<div class="item ${lock ? 'locked' : ''}"><div class="ic">${u.icon}</div><div class="info"><div class="name">${u.name}</div><small>${u.desc}${lock ? `（あと${u.need - u.have}件で解放）` : ''}</small></div>
+    <button class="buy" data-upg="${u.id}" ${lock || u.cost > S.money ? 'disabled' : ''}>購入<small class="num">${yen(u.cost)}</small></button></div>`;
+  return `<div class="bar"><h2>強化</h2><span class="note">購入済み ${done}/${all.length}</span></div>
+    ${avail.map(u => row(u)).join('') || '<p class="note">いま買える強化はありません。</p>'}
+    ${soon.length ? `<p class="note">もうすぐ解放</p>${soon.map(u => row(u, true)).join('')}` : ''}`;
+}
+function viewLegacy() {
+  const g = prestigeGain(), inc = incomes();
+  const nextAt = Math.pow(g + 1, 3) * PRESTIGE_BASE;
+  return `<div class="prestige"><div class="note">いまの代で稼いだ額</div><div class="big num">${yen(S.earned)}</div>
+    <p class="note">引退して次の代に引き継ぐと、物件・会社・強化はリセット。代わりに<b style="color:var(--gold)">遺産ポイント</b>1つにつき、すべての収入が永久に+10%。社員とダイヤは引き継ぎます。</p>
+    <div class="stats"><div class="stat"><small>もらえる遺産</small><b class="num">${g} pt</b></div><div class="stat"><small>次のポイントまで</small><b class="num">${yen(Math.max(0, nextAt - S.earned))}</b></div></div>
+    <button class="buy" style="padding:14px" data-retireask ${g < 1 ? 'disabled' : ''}>${g < 1 ? '100億円稼ぐと引退できます' : `引退して${S.gen + 1}代目へ（+${g}pt）`}</button></div>
+    <div class="stats">
+      <div class="stat"><small>現在</small><b>${S.gen}代目</b></div>
+      <div class="stat"><small>遺産ボーナス</small><b class="num">×${(1 + S.legacy * 0.1).toFixed(1)}（${S.legacy}pt）</b></div>
+      <div class="stat"><small>毎秒の収入</small><b class="num">${yen(inc.total)}</b></div>
+      <div class="stat"><small>生涯で稼いだ額</small><b class="num">${yen(S.lifetime)}</b></div>
+    </div>`;
+}
+function render() {
+  renderTabs();
+  const m = $('main'), keep = m.scrollTop;
+  m.innerHTML = ({ re: viewRE, co: viewCO, staff: viewStaff, upg: viewUpg, legacy: viewLegacy })[tab]();
+  m.scrollTop = keep;
+  renderTop();
+}
+function renderTop() {
+  const inc = incomes();
+  $('money').textContent = yen(S.money);
+  $('rate').textContent = `毎秒 +${yen(inc.total)}`;
+  $('gems').textContent = `💎 ${fmt(S.gems)}`;
+  $('legacyPill').textContent = `${S.gen}代目・×${(1 + S.legacy * 0.1).toFixed(1)}`;
+  const now = Date.now();
+  $('buffs').innerHTML = S.buffs.filter(b => b.until > now).map(b => `<span class="pill buff">${b.label} ${Math.ceil((b.until - now) / 60000)}分</span>`).join('');
+  $('eventBell').hidden = S.pending === null;
+}
+$('main').addEventListener('click', e => {
+  const t = e.target.closest('button'); if (!t || t.disabled) return;
+  if (t.dataset.qty) { qty = t.dataset.qty === 'max' ? 'max' : +t.dataset.qty; render(); return; }
+  if (t.dataset.buy) { const [kind, id] = t.dataset.buy.split(':'); const x = (kind === 're' ? RE : CO).find(v => v.id === id); buy(kind, x, qty); save(); render(); return; }
+  if (t.dataset.upg) {
+    const u = GLOBAL_UPG.concat(itemUpgrades()).find(v => v.id === t.dataset.upg);
+    if (u && S.money >= u.cost) { S.money -= u.cost; S.upg[u.id] = true; if (u.id === 'auto') S.auto = true; toast(`${u.name} を導入！`); save(); render(); }
+    return;
+  }
+  if (t.dataset.pull) { const [n, w] = t.dataset.pull.split(':'); pull(+n, w); return; }
+  if (t.dataset.train !== undefined) { const s = S.staff[+t.dataset.train], c = trainCost(s); if (S.money >= c && s.lvl < 10) { S.money -= c; s.lvl++; toast(`${s.name} が Lv${s.lvl} に！`); save(); render(); } return; }
+  if (t.dataset.auto !== undefined) { S.auto = !S.auto; save(); render(); return; }
+  if (t.dataset.retireask !== undefined) {
+    showModal(`<h3>引退しますか？</h3><p>物件・会社・強化はリセットされます。<br>遺産 +${prestigeGain()}pt で、収入は永久に ×${(1 + (S.legacy + prestigeGain()) * 0.1).toFixed(1)} になります。</p>
+      <div class="choices"><button class="buy" data-retire>引退する</button><button class="choice" data-close style="text-align:center">やめておく</button></div>`);
+  }
+});
+
+// ---------- Loop ----------
+let lastTick = Date.now(), uiT = 0, popT = 0, saveT = 0, pressing = false;
+$('main').addEventListener('pointerdown', () => { pressing = true; });
+addEventListener('pointerup', () => { setTimeout(() => { pressing = false; }, 0); });
+addEventListener('pointercancel', () => { pressing = false; });
+function tick() {
+  const now = Date.now();
+  const dt = Math.min(5, (now - lastTick) / 1000); lastTick = now;
+  const inc = incomes();
+  earn(inc.total * dt);
+  S.buffs = S.buffs.filter(b => b.until > now);
+  if (S.pending === null && now > S.nextEvent) { S.pending = Math.floor(Math.random() * EVENTS.length); toast('📩 イベント発生！ 右下から確認しよう'); }
+  if ((saveT += dt) > 5) { saveT = 0; autoInvest(); save(); }
+  if ((popT += dt) > 1.2 && inc.total > 0 && city.bld.length) {
+    popT = 0; const b = pick(city.bld);
+    city.pops.push({ x: b.x + b.w / 2, y: roadY() - b.h - 4, a: 1, s: '+' + yen(inc.total * 1.2), dt: 0 });
+  }
+  if ((uiT += dt) > 0.5 && !pressing) { uiT = 0; render(); } else renderTop();
+}
+function frame(ts) {
+  for (const p of city.pops) p.dt = 1 / 60;
+  drawCity(ts / 1000);
+  requestAnimationFrame(frame);
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden) save(); else { lastTick = Date.now(); } });
+addEventListener('pagehide', save);
+
+// ---------- Boot ----------
+function offlineEarnings() {
+  const away = (Date.now() - S.lastSave) / 1000;
+  if (away < 60) return;
+  const cap = (S.upg.offcap ? 24 : 8) * 3600, rate = S.upg.off1 ? 1 : 0.5;
+  const secs = Math.min(away, cap), v = incomes().total * secs * rate;
+  const gems = Math.min(24, Math.floor(secs / 3600));
+  if (v <= 0 && !gems) return;
+  earn(v); S.gems += gems;
+  const h = Math.floor(secs / 3600), m = Math.floor(secs % 3600 / 60);
+  showModal(`<h3>おかえりなさい</h3><p>留守にしていた ${h ? h + '時間' : ''}${m}分 の間に<br><b style="font-family:var(--display);font-size:26px;color:var(--gold)">${yen(v)}</b><br>稼いでいました${gems ? `（💎 +${gems}）` : ''}</p>
+    <p class="note">${rate < 1 ? '強化「24時間管理人」で留守中の稼ぎが2倍に。' : ''}${away > cap ? `留守中に稼げるのは最大${cap / 3600}時間まで。` : ''}</p><button class="buy" data-close>受け取る</button>`);
+}
+const loaded = load();
+S = loaded || fresh();
+resizeCity();
+offlineEarnings();
+if (!loaded) showModal(`<h3>ナイトシティ・タイクーン</h3><p>駐車場1つから始めて、不動産と会社で夜の街を手に入れよう。</p><p class="note">お金は自動でたまります。たまったら物件や事業を買い、強化や社員で収入を伸ばそう。アプリを閉じていても稼ぎます。</p><button class="buy" data-close>はじめる</button>`);
+render();
+setInterval(tick, 100);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
